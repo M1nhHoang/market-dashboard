@@ -137,3 +137,33 @@ async def get_session_dependency() -> AsyncGenerator[AsyncSession, None]:
     """
     async with get_session() as session:
         yield session
+
+
+# =============================================================================
+# Sync Connection (for simple read operations in API routes)
+# =============================================================================
+import sqlite3
+
+
+def get_connection(db_path=None):
+    """
+    Get a synchronous SQLite connection for simple read operations.
+    
+    This is a simpler alternative to async sessions when you just need
+    to read data and don't need ORM features.
+    
+    Usage:
+        conn = get_connection()
+        cursor = conn.execute("SELECT * FROM indicators")
+        rows = cursor.fetchall()
+        conn.close()
+    
+    Returns a connection with row_factory set to sqlite3.Row
+    so you can access columns by name.
+    """
+    if db_path is None:
+        db_path = settings.DATABASE_PATH
+    
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    return conn

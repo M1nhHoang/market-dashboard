@@ -57,6 +57,7 @@ from .session import (
     drop_tables,
     get_session,
     get_session_dependency,
+    get_connection,
 )
 
 # Initialization utilities
@@ -98,6 +99,7 @@ __all__ = [
     "drop_tables",
     "get_session",
     "get_session_dependency",
+    "get_connection",
     # Init utilities
     "init_database",
     "init_database_async",

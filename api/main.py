@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings, ensure_directories
-from database import init_database
+from database import init_database_async, init_engine
 from .routes import router
 
 
@@ -15,7 +15,7 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     # Startup
     ensure_directories()
-    init_database(settings.DATABASE_PATH)
+    await init_engine()  # Initialize DB engine
     yield
     # Shutdown
     pass

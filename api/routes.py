@@ -16,8 +16,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 
 from config import settings
-from database import get_connection
-from constants import INDICATOR_GROUPS
+from database import get_connection, INDICATOR_GROUPS
 
 router = APIRouter()
 
