@@ -1,0 +1,149 @@
+{
+  "version": "1.0",
+  "description": "Causal chain templates for Vietnam and Global macro analysis",
+  "templates": [
+    {
+      "id": "dtcc_liquidity",
+      "name": "Đầu tư công → Thanh khoản",
+      "region": "vietnam",
+      "trigger_keywords": ["đầu tư công", "giải ngân", "ĐTCC", "KBNN", "vốn ngân sách", "ngân sách nhà nước"],
+      "chain": [
+        {"step": 1, "event": "Giải ngân đầu tư công tăng mạnh", "verified_by": "MoF data"},
+        {"step": 2, "event": "KBNN rút tiền gửi từ hệ thống ngân hàng", "verified_by": "SBV liquidity data"},
+        {"step": 3, "event": "Thanh khoản liên ngân hàng căng thẳng", "verified_by": "Interbank rate"},
+        {"step": 4, "event": "Ngân hàng tăng lãi suất huy động", "verified_by": "Bank announcements"}
+      ],
+      "affected_indicators": ["interbank_rate", "deposit_rate", "lending_rate", "omo_net"],
+      "typical_lag": "1-2 weeks"
+    },
+    {
+      "id": "fed_vnd_pressure",
+      "name": "Fed hawkish → VND pressure",
+      "region": "global",
+      "trigger_keywords": ["Fed", "FOMC", "Powell", "rate hike", "hawkish", "dot plot", "lãi suất Mỹ"],
+      "chain": [
+        {"step": 1, "event": "Fed signals hawkish stance / keeps rates high", "verified_by": "FOMC statement"},
+        {"step": 2, "event": "US Treasury yields rise", "verified_by": "US10Y"},
+        {"step": 3, "event": "DXY strengthens", "verified_by": "DXY index"},
+        {"step": 4, "event": "EM currencies under pressure", "verified_by": "EM FX basket"},
+        {"step": 5, "event": "VND depreciation pressure, SBV may intervene", "verified_by": "USD/VND rate"}
+      ],
+      "affected_indicators": ["fed_rate", "us10y", "dxy", "usd_vnd"],
+      "impact_on_vietnam": "Áp lực tỷ giá VND, room giảm lãi suất trong nước bị hạn chế",
+      "typical_lag": "immediate to 1 week"
+    },
+    {
+      "id": "tt02_npl",
+      "name": "TT02 hết hiệu lực → NPL tăng",
+      "region": "vietnam",
+      "trigger_keywords": ["thông tư 02", "TT02", "nợ xấu", "NPL", "tái cơ cấu nợ", "trích lập dự phòng"],
+      "chain": [
+        {"step": 1, "event": "Thông tư 02 hết hiệu lực", "verified_by": "SBV announcement"},
+        {"step": 2, "event": "Ngân hàng phải ghi nhận nợ xấu thực tế", "verified_by": "Bank reports"},
+        {"step": 3, "event": "Tỷ lệ NPL tăng đột biến", "verified_by": "NPL ratio data"},
+        {"step": 4, "event": "Áp lực trích lập dự phòng tăng", "verified_by": "Bank financials"},
+        {"step": 5, "event": "Lợi nhuận ngân hàng có thể giảm", "verified_by": "Quarterly results"}
+      ],
+      "affected_indicators": ["npl_ratio", "bank_provisions", "bank_profits"],
+      "typical_lag": "1 quarter"
+    },
+    {
+      "id": "china_slowdown_export",
+      "name": "China slowdown → VN export risk",
+      "region": "global",
+      "trigger_keywords": ["China PMI", "Trung Quốc", "sản xuất Trung Quốc", "xuất khẩu sang Trung Quốc", "kinh tế Trung Quốc"],
+      "chain": [
+        {"step": 1, "event": "China manufacturing PMI contracts", "verified_by": "NBS/Caixin PMI"},
+        {"step": 2, "event": "Demand for industrial commodities weakens", "verified_by": "Copper, steel prices"},
+        {"step": 3, "event": "Vietnam exports to China may slow", "verified_by": "GSO export data"}
+      ],
+      "affected_indicators": ["china_pmi", "copper_price", "vn_export_china"],
+      "impact_on_vietnam": "Xuất khẩu VN sang Trung Quốc chiếm ~17% tổng XK - cần theo dõi",
+      "typical_lag": "1-2 months"
+    },
+    {
+      "id": "omo_injection",
+      "name": "SBV OMO injection → Liquidity support",
+      "region": "vietnam",
+      "trigger_keywords": ["OMO", "nghiệp vụ thị trường mở", "bơm ròng", "hút ròng", "SBV", "NHNN"],
+      "chain": [
+        {"step": 1, "event": "SBV net injects via OMO", "verified_by": "SBV OMO data"},
+        {"step": 2, "event": "Banking system liquidity improves", "verified_by": "Interbank rate"},
+        {"step": 3, "event": "Short-term rates stabilize or decrease", "verified_by": "ON/1W rates"}
+      ],
+      "affected_indicators": ["omo_net", "interbank_rate", "overnight_rate"],
+      "typical_lag": "immediate"
+    },
+    {
+      "id": "cpi_inflation",
+      "name": "CPI tăng → Chính sách tiền tệ thắt chặt",
+      "region": "vietnam",
+      "trigger_keywords": ["CPI", "lạm phát", "giá tiêu dùng", "chỉ số giá"],
+      "chain": [
+        {"step": 1, "event": "CPI tăng cao hơn mục tiêu", "verified_by": "GSO CPI data"},
+        {"step": 2, "event": "SBV thận trọng hơn với nới lỏng tiền tệ", "verified_by": "SBV statement"},
+        {"step": 3, "event": "Room giảm lãi suất bị hạn chế", "verified_by": "Policy rate"},
+        {"step": 4, "event": "Chi phí vay vốn doanh nghiệp duy trì cao", "verified_by": "Lending rate"}
+      ],
+      "affected_indicators": ["cpi", "policy_rate", "lending_rate"],
+      "typical_lag": "1-2 months"
+    },
+    {
+      "id": "usd_strengthen_commodities",
+      "name": "USD mạnh → Hàng hóa giảm",
+      "region": "global",
+      "trigger_keywords": ["DXY", "USD Index", "dollar mạnh", "đồng đô la"],
+      "chain": [
+        {"step": 1, "event": "DXY index tăng mạnh", "verified_by": "DXY"},
+        {"step": 2, "event": "Giá hàng hóa định giá bằng USD giảm", "verified_by": "Commodity prices"},
+        {"step": 3, "event": "Giá xuất khẩu nông sản VN có thể giảm", "verified_by": "Export prices"}
+      ],
+      "affected_indicators": ["dxy", "gold_price", "oil_price", "coffee_price"],
+      "impact_on_vietnam": "Giá xuất khẩu nông sản, cà phê, cao su có thể bị ảnh hưởng",
+      "typical_lag": "immediate"
+    },
+    {
+      "id": "credit_growth",
+      "name": "Tăng trưởng tín dụng → Áp lực thanh khoản",
+      "region": "vietnam",
+      "trigger_keywords": ["tín dụng", "tăng trưởng tín dụng", "room tín dụng", "cho vay"],
+      "chain": [
+        {"step": 1, "event": "Tăng trưởng tín dụng tăng tốc", "verified_by": "SBV credit data"},
+        {"step": 2, "event": "Ngân hàng cần huy động thêm vốn", "verified_by": "Deposit growth"},
+        {"step": 3, "event": "Cạnh tranh lãi suất huy động", "verified_by": "Deposit rates"},
+        {"step": 4, "event": "Thanh khoản hệ thống có thể căng", "verified_by": "Interbank rate"}
+      ],
+      "affected_indicators": ["credit_growth", "deposit_growth", "deposit_rate", "interbank_rate"],
+      "typical_lag": "2-4 weeks"
+    },
+    {
+      "id": "oil_price_inflation",
+      "name": "Giá dầu tăng → Áp lực lạm phát",
+      "region": "global",
+      "trigger_keywords": ["giá dầu", "Brent", "WTI", "OPEC", "dầu thô"],
+      "chain": [
+        {"step": 1, "event": "Giá dầu thế giới tăng mạnh", "verified_by": "Brent/WTI"},
+        {"step": 2, "event": "Chi phí vận tải tăng", "verified_by": "Transport CPI"},
+        {"step": 3, "event": "Áp lực lên CPI Việt Nam", "verified_by": "VN CPI"},
+        {"step": 4, "event": "Petrolimex có thể điều chỉnh giá xăng", "verified_by": "Petrol price"}
+      ],
+      "affected_indicators": ["oil_price", "transport_cpi", "vn_cpi", "petrol_price"],
+      "impact_on_vietnam": "VN nhập khẩu ròng dầu - giá dầu tăng làm tăng chi phí sản xuất và CPI",
+      "typical_lag": "2-4 weeks"
+    },
+    {
+      "id": "fdi_usd_supply",
+      "name": "FDI giải ngân → Nguồn cung USD",
+      "region": "vietnam",
+      "trigger_keywords": ["FDI", "vốn ngoại", "đầu tư nước ngoài", "giải ngân FDI"],
+      "chain": [
+        {"step": 1, "event": "FDI giải ngân tăng mạnh", "verified_by": "MPI FDI data"},
+        {"step": 2, "event": "Nguồn cung USD trong nước tăng", "verified_by": "FX market"},
+        {"step": 3, "event": "Áp lực tỷ giá USD/VND giảm", "verified_by": "USD/VND rate"},
+        {"step": 4, "event": "SBV có thể mua USD tăng dự trữ", "verified_by": "FX reserves"}
+      ],
+      "affected_indicators": ["fdi_disbursement", "usd_vnd", "fx_reserves"],
+      "typical_lag": "immediate to 1 month"
+    }
+  ]
+}
