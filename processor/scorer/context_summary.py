@@ -40,7 +40,7 @@ def generate_context_summary(
     try:
         response = client.generate(
             prompt=prompt,
-            max_tokens=800,
+
             temperature=0.3,
         )
         return response.content

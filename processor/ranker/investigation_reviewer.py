@@ -66,7 +66,6 @@ class InvestigationReviewer:
         try:
             response = self.client.generate(
                 prompt=prompt,
-                max_tokens=2000,
                 temperature=0.3,
             )
             

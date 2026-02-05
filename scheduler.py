@@ -20,7 +20,6 @@ from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
 from config import settings, ensure_directories
-from database import init_database, get_connection
 
 
 class MarketIntelligenceScheduler:
@@ -55,8 +54,7 @@ class MarketIntelligenceScheduler:
         # Ensure directories exist
         ensure_directories()
         
-        # Initialize database
-        init_database(settings.DATABASE_PATH)
+        # NOTE: Database initialization is now handled by pipeline via init_engine()
         
         # Main job: Full pipeline every hour
         # This includes: crawling → classification → scoring → ranking
@@ -84,12 +82,14 @@ class MarketIntelligenceScheduler:
         Job: Run the complete 3-Layer LLM Pipeline.
         
         Steps:
-        1. Load raw data from crawlers
-        2. Transform to database format
-        3. Run Layer 1 (Classification)
-        4. Run Layer 2 (Scoring)
-        5. Run Layer 3 (Ranking)
-        6. Save results to database
+        1. Crawl data from sources
+        2. Transform to CrawlerOutput format
+        3. Save metrics and calendar to database
+        4. Run Layer 1 (Classification + Dedup)
+        5. Run Layer 2 (Scoring with context)
+        6. Run Layer 3 (Ranking with decay)
+        7. Review investigations
+        8. Save run history
         """
         logger.info("Starting full pipeline run...")
         
@@ -97,7 +97,7 @@ class MarketIntelligenceScheduler:
             from processor.pipeline import Pipeline
             
             pipeline = Pipeline()
-            result = pipeline.run()
+            result = await pipeline.run()  # async call
             
             self._last_run_result = result
             
@@ -128,10 +128,9 @@ class MarketIntelligenceScheduler:
     def run_once(self):
         """Run the full pipeline once and exit."""
         ensure_directories()
-        init_database(settings.DATABASE_PATH)
         
         logger.info("Running pipeline once...")
-        result = asyncio.get_event_loop().run_until_complete(self.run_full_pipeline())
+        result = asyncio.run(self.run_full_pipeline())
         
         if result:
             logger.info("Pipeline completed successfully")

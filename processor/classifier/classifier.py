@@ -5,11 +5,11 @@ Filters news by market relevance and assigns categories.
 This layer runs on all raw news before scoring.
 """
 import json
+from typing import Optional
 
-import anthropic
 from loguru import logger
 
-from config import settings
+from llm import get_client, LLMClient
 from prompts import PromptLoader
 from .models import ClassificationResult
 
@@ -20,19 +20,18 @@ class Classifier:
     
     Filters news by market relevance and assigns categories.
     This layer runs on all raw news before scoring.
+    
+    Uses LLMClient interface (GLM by default).
     """
     
-    def __init__(self, api_key: str = None, model: str = None):
+    def __init__(self, client: Optional[LLMClient] = None):
         """
         Initialize classifier.
         
         Args:
-            api_key: Anthropic API key (uses settings if not provided)
-            model: LLM model name (uses settings if not provided)
+            client: LLM client instance (creates default GLM client if not provided)
         """
-        self.api_key = api_key or settings.ANTHROPIC_API_KEY
-        self.model = model or settings.LLM_MODEL
-        self.client = anthropic.Anthropic(api_key=self.api_key)
+        self.client = client or get_client()
         self.prompt_loader = PromptLoader()
         
     def classify(self, news_item: dict) -> ClassificationResult:
@@ -54,29 +53,18 @@ class Classifier:
         )
         
         try:
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=500,
+            response = self.client.generate(
+                prompt=prompt,
                 temperature=0.1,  # Low temp for consistent classification
-                messages=[{"role": "user", "content": prompt}]
             )
             
-            raw_output = response.content[0].text
+            raw_output = response.content
             result = self._parse_response(raw_output)
             return result
             
-        except anthropic.APIError as e:
-            logger.error(f"Claude API error in classifier: {e}")
-            # Return as not relevant on error to avoid blocking pipeline
-            return ClassificationResult(
-                is_market_relevant=False,
-                category=None,
-                linked_indicators=[],
-                reasoning=f"Classification error: {str(e)}",
-                raw_output=""
-            )
         except Exception as e:
-            logger.exception(f"Unexpected error in classifier: {e}")
+            logger.error(f"LLM API error in classifier: {e}")
+            # Return as not relevant on error to avoid blocking pipeline
             return ClassificationResult(
                 is_market_relevant=False,
                 category=None,
