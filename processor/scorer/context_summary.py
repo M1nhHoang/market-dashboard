@@ -1,17 +1,16 @@
 """
 Context Summary Generator - Utility for summarizing previous context.
 """
-import anthropic
 from loguru import logger
 
+from llm import LLMClient, get_client
 from prompts import PromptLoader
 
 
 def generate_context_summary(
-    client: anthropic.Anthropic,
-    model: str,
     previous_context: str,
-    lookback_days: int = 7
+    lookback_days: int = 7,
+    client: LLMClient = None,
 ) -> str:
     """
     Generate a summary of previous context for scoring prompt.
@@ -20,10 +19,9 @@ def generate_context_summary(
     into a digestible summary that can be included in scoring prompts.
     
     Args:
-        client: Anthropic client instance
-        model: LLM model name
         previous_context: Raw context string from previous runs
         lookback_days: Number of days the context covers
+        client: LLM client instance (creates default if not provided)
         
     Returns:
         Summarized context string
@@ -31,6 +29,7 @@ def generate_context_summary(
     if not previous_context or previous_context.strip() == "":
         return "Đây là lần phân tích đầu tiên, chưa có context từ các lần trước."
     
+    client = client or get_client()
     loader = PromptLoader()
     prompt = loader.format(
         "context_summary",
@@ -39,13 +38,12 @@ def generate_context_summary(
     )
     
     try:
-        response = client.messages.create(
-            model=model,
+        response = client.generate(
+            prompt=prompt,
             max_tokens=800,
             temperature=0.3,
-            messages=[{"role": "user", "content": prompt}]
         )
-        return response.content[0].text
+        return response.content
     except Exception as e:
         logger.error(f"Failed to generate context summary: {e}")
         return "Context summary generation failed."

@@ -7,10 +7,9 @@ and updates their status (open, updated, resolved, stale, escalated).
 import json
 from datetime import datetime
 
-import anthropic
 from loguru import logger
 
-from config import settings
+from llm import get_client, LLMClient
 from prompts import PromptLoader
 
 
@@ -22,17 +21,14 @@ class InvestigationReviewer:
     for or against open investigations.
     """
     
-    def __init__(self, api_key: str = None, model: str = None):
+    def __init__(self, client: LLMClient = None):
         """
         Initialize reviewer.
         
         Args:
-            api_key: Anthropic API key (uses settings if not provided)
-            model: LLM model name (uses settings if not provided)
+            client: LLM client instance (creates default if not provided)
         """
-        self.api_key = api_key or settings.ANTHROPIC_API_KEY
-        self.model = model or settings.LLM_MODEL
-        self.client = anthropic.Anthropic(api_key=self.api_key)
+        self.client = client or get_client()
         self.prompt_loader = PromptLoader()
     
     def review(
@@ -68,14 +64,13 @@ class InvestigationReviewer:
         )
         
         try:
-            response = self.client.messages.create(
-                model=self.model,
+            response = self.client.generate(
+                prompt=prompt,
                 max_tokens=2000,
                 temperature=0.3,
-                messages=[{"role": "user", "content": prompt}]
             )
             
-            raw_output = response.content[0].text
+            raw_output = response.content
             return self._parse_response(raw_output)
             
         except Exception as e:

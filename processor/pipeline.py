@@ -172,11 +172,7 @@ class Pipeline:
             context_text = self.context_builder.format_for_prompt(previous_context)
             
             # Generate context summary
-            import anthropic
-            client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
             context_summary = generate_context_summary(
-                client, 
-                settings.LLM_MODEL,
                 context_text, 
                 self.lookback_days
             )

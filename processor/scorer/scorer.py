@@ -7,10 +7,10 @@ Requires previous context and open investigations for continuity.
 import json
 from pathlib import Path
 
-import anthropic
 from loguru import logger
 
 from config import settings
+from llm import get_client, LLMClient
 from prompts import PromptLoader
 from .models import ScoringResult
 
@@ -25,21 +25,17 @@ class Scorer:
     
     def __init__(
         self, 
-        api_key: str = None, 
-        model: str = None,
+        client: LLMClient = None,
         templates_path: Path = None
     ):
         """
         Initialize scorer.
         
         Args:
-            api_key: Anthropic API key (uses settings if not provided)
-            model: LLM model name (uses settings if not provided)
+            client: LLM client instance (creates default if not provided)
             templates_path: Path to causal templates JSON file
         """
-        self.api_key = api_key or settings.ANTHROPIC_API_KEY
-        self.model = model or settings.LLM_MODEL
-        self.client = anthropic.Anthropic(api_key=self.api_key)
+        self.client = client or get_client()
         self.prompt_loader = PromptLoader()
         
         # Load causal templates
@@ -94,22 +90,18 @@ class Scorer:
         )
         
         try:
-            response = self.client.messages.create(
-                model=self.model,
+            response = self.client.generate(
+                prompt=prompt,
                 max_tokens=2000,
                 temperature=0.3,
-                messages=[{"role": "user", "content": prompt}]
             )
             
-            raw_output = response.content[0].text
+            raw_output = response.content
             result = self._parse_response(raw_output)
             return result
             
-        except anthropic.APIError as e:
-            logger.error(f"Claude API error in scorer: {e}")
-            return self._error_result(str(e))
         except Exception as e:
-            logger.exception(f"Unexpected error in scorer: {e}")
+            logger.exception(f"LLM error in scorer: {e}")
             return self._error_result(str(e))
     
     def score_batch(

@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     DATABASE_PATH: Path = Field(default_factory=lambda: Path(__file__).parent / "data" / "market.db")
     
     # API Keys
-    ANTHROPIC_API_KEY: str = Field(default="", description="Claude API key")
+    GLM_API_KEY: str = Field(default="", description="ZhipuAI GLM API key")
     
     # Logging
     LOG_LEVEL: str = Field(default="INFO")
@@ -25,8 +25,10 @@ class Settings(BaseSettings):
     CRAWLER_INTERVAL_HOURS: int = Field(default=1)
     CRAWLERS_ENABLE_SSL: bool = Field(default=True, description="Enable SSL verification for crawlers")
     
-    # LLM
-    LLM_MODEL: str = Field(default="claude-sonnet-4-20250514")
+    # LLM - Z.AI GLM-4.7 via OpenAI-compatible API
+    LLM_PROVIDER: str = Field(default="glm", description="LLM provider (glm)")
+    LLM_MODEL: str = Field(default="glm-4.7", description="LLM model name (glm-4.7, glm-4.5-air)")
+    LLM_VERIFY_SSL: bool = Field(default=True, description="Verify SSL for LLM API calls")
     CONTEXT_LOOKBACK_DAYS: int = Field(default=7)
     
     # API

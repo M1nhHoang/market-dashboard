@@ -8,10 +8,10 @@ import json
 from datetime import datetime
 from typing import Optional
 
-import anthropic
 from loguru import logger
 
 from config import settings
+from llm import get_client, LLMClient
 from .models import RankingResult
 from .config import (
     MAX_KEY_EVENTS,
@@ -29,18 +29,18 @@ class Ranker:
     Runs on ALL active events, not just today's.
     """
     
-    def __init__(self, use_llm_for_topics: bool = False):
+    def __init__(self, use_llm_for_topics: bool = False, client: LLMClient = None):
         """
         Initialize ranker.
         
         Args:
             use_llm_for_topics: Whether to use LLM for hot topic detection
                                (if False, uses simple frequency counting)
+            client: LLM client instance (creates default if needed)
         """
         self.use_llm = use_llm_for_topics
         if use_llm_for_topics:
-            self.client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-            self.model = settings.LLM_MODEL
+            self.client = client or get_client()
     
     def rank_event(
         self,
