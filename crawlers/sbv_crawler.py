@@ -30,6 +30,7 @@ except ImportError:
     logger.warning("[SBV] PyMuPDF not installed. PDF text extraction disabled. Install with: pip install pymupdf")
 
 from .base_crawler import BaseCrawler, CrawlResult, IndicatorData
+from data_transformers.sbv import SBVTransformer
 from config import settings
 
 
@@ -175,6 +176,14 @@ class SBVCrawler(BaseCrawler):
         # Rate limiting
         self._last_request = 0
         self._min_interval = 2.0  # seconds between requests
+        
+        # Transformer instance
+        self._transformer = SBVTransformer()
+    
+    @property
+    def transformer(self) -> SBVTransformer:
+        """Return the SBV transformer instance."""
+        return self._transformer
         
     async def _rate_limit(self):
         """Ensure minimum interval between requests."""
@@ -2140,7 +2149,11 @@ class SBVCrawler(BaseCrawler):
         # Save results to file
         if result.success:
             logger.info(f"[{self.name}] Successfully crawled {len(result.data)} items")
-            self.save_raw(result)
+            
+            # Transform and save transformed output
+            output = self.transformer.transform(result.to_dict())
+            self.save_transformed(output)
+            logger.info(f"[{self.name}] Transformed: {output.summary()}")
         else:
             logger.error(f"[{self.name}] Crawl failed: {result.error}")
         

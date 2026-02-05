@@ -6,71 +6,106 @@ This module provides database access for the Market Intelligence system.
 Structure:
     database/
     ├── __init__.py      # This file - public API
-    ├── schema.py        # SQL schema definitions
-    └── init.py          # Database initialization utilities
+    ├── session.py       # SQLAlchemy async session management
+    ├── init.py          # Database initialization utilities
+    └── models/          # SQLAlchemy ORM models
+        ├── __init__.py
+        ├── base.py
+        ├── indicators.py
+        ├── events.py
+        ├── investigations.py
+        └── system.py
 
 Usage:
-    # Use DAO layer for all database operations
-    from dao import get_db
+    from database import get_session
+    from database.models import Indicator, Event
     
-    db = get_db()
-    indicator = db.indicators.get("interbank_on")
-    event_id = db.events.create(event_data)
-    
-    # Or use raw connection for direct SQL
-    from database import get_connection, init_database
-    
-    init_database(db_path)
-    conn = get_connection(db_path)
+    async with get_session() as session:
+        result = await session.execute(select(Indicator))
+        indicators = result.scalars().all()
 
-For schema details, see database/schema.py
+For schema details, see database/models/
 """
 
-# Schema exports
-from .schema import (
-    FULL_SCHEMA,
-    INDICATORS_SCHEMA,
-    EVENTS_SCHEMA,
-    INVESTIGATIONS_SCHEMA,
-    SYSTEM_SCHEMA,
+# SQLAlchemy Models
+from .models import (
+    # Base
+    Base,
+    TimestampMixin,
+    # Indicators
+    Indicator,
+    IndicatorHistory,
+    # Events
+    Event,
+    CausalAnalysis,
+    TopicFrequency,
+    ScoreHistory,
+    # Investigations
+    Investigation,
+    InvestigationEvidence,
+    Prediction,
+    # System
+    RunHistory,
+    CalendarEvent,
+)
+
+# Session Management
+from .session import (
+    init_engine,
+    close_engine,
+    create_tables,
+    drop_tables,
+    get_session,
+    get_session_dependency,
 )
 
 # Initialization utilities
 from .init import (
     init_database,
-    get_connection,
+    init_database_async,
+    get_table_counts_async,
     check_database_exists,
-    get_table_counts,
-    vacuum_database,
+    run_migrations,
+    create_migration,
 )
 
-# Re-export DAO for convenience
-from dao import get_db, DatabaseConnection
-
-# Re-export constants for backward compatibility
-from constants import (
+# Re-export SBV-specific mappings from data_transformers
+from data_transformers.sbv import (
     INDICATOR_GROUPS,
     INTERBANK_TERM_MAP,
     EVENT_CATEGORIES,
 )
 
 __all__ = [
-    # Schema
-    "FULL_SCHEMA",
-    "INDICATORS_SCHEMA", 
-    "EVENTS_SCHEMA",
-    "INVESTIGATIONS_SCHEMA",
-    "SYSTEM_SCHEMA",
+    # SQLAlchemy Models
+    "Base",
+    "TimestampMixin",
+    "Indicator",
+    "IndicatorHistory",
+    "Event",
+    "CausalAnalysis",
+    "TopicFrequency",
+    "ScoreHistory",
+    "Investigation",
+    "InvestigationEvidence",
+    "Prediction",
+    "RunHistory",
+    "CalendarEvent",
+    # Session Management
+    "init_engine",
+    "close_engine",
+    "create_tables",
+    "drop_tables",
+    "get_session",
+    "get_session_dependency",
     # Init utilities
     "init_database",
-    "get_connection",
+    "init_database_async",
+    "get_table_counts_async",
     "check_database_exists",
-    "get_table_counts",
-    "vacuum_database",
-    # DAO
-    "get_db",
-    "DatabaseConnection",
-    # Constants (backward compat)
+    "run_migrations",
+    "create_migration",
+    # Constants (re-exported from data_transformers.sbv)
     "INDICATOR_GROUPS",
     "INTERBANK_TERM_MAP",
     "EVENT_CATEGORIES",

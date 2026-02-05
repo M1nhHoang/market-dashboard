@@ -1,35 +1,41 @@
 """
 Constants package for Market Intelligence Dashboard.
 
-Contains all configuration constants, mappings, and enums.
+Contains shared enums and configuration constants.
+
+Note: Source-specific mappings (indicator IDs, term maps) are now in
+      data_transformers/{source}/mappings.py for better modularity.
 """
 
-from .indicator_mappings import (
-    INDICATOR_GROUPS,
-    INTERBANK_TERM_MAP,
-    POLICY_RATE_MAP,
-    GOLD_PRICE_MAP,
-    CPI_INDICATOR_MAP,
-    OMO_INDICATOR_MAP,
-    EVENT_CATEGORIES,
+from .enums import (
+    DisplaySection,
+    PriorityLevel,
+    InvestigationStatus,
+    PredictionStatus,
+    ConfidenceLevel,
+    EvidenceType,
+    # Dict versions for backward compatibility
     DISPLAY_SECTIONS,
     PRIORITY_LEVELS,
-    INVESTIGATION_STATUS,
-    PREDICTION_STATUS,
+    INVESTIGATION_STATUSES,
+    PREDICTION_STATUSES,
     CONFIDENCE_LEVELS,
+    EVIDENCE_TYPES,
 )
 
 __all__ = [
-    "INDICATOR_GROUPS",
-    "INTERBANK_TERM_MAP",
-    "POLICY_RATE_MAP",
-    "GOLD_PRICE_MAP",
-    "CPI_INDICATOR_MAP",
-    "OMO_INDICATOR_MAP",
-    "EVENT_CATEGORIES",
+    # Enums
+    "DisplaySection",
+    "PriorityLevel",
+    "InvestigationStatus",
+    "PredictionStatus",
+    "ConfidenceLevel",
+    "EvidenceType",
+    # Dict versions
     "DISPLAY_SECTIONS",
     "PRIORITY_LEVELS",
-    "INVESTIGATION_STATUS",
-    "PREDICTION_STATUS",
+    "INVESTIGATION_STATUSES",
+    "PREDICTION_STATUSES",
     "CONFIDENCE_LEVELS",
+    "EVIDENCE_TYPES",
 ]

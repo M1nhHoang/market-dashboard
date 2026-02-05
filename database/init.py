@@ -1,53 +1,11 @@
 """
 Database Initialization and Utilities
 
-Functions for initializing and managing the SQLite database.
+Functions for initializing and managing the SQLite database with SQLAlchemy.
 """
-import sqlite3
 from pathlib import Path
-from typing import Optional
 
 from loguru import logger
-
-from .schema import FULL_SCHEMA
-
-
-def init_database(db_path: Path) -> None:
-    """
-    Initialize the SQLite database with schema.
-    
-    Args:
-        db_path: Path to the SQLite database file
-    """
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    logger.info(f"Initializing database at {db_path}")
-    
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.executescript(FULL_SCHEMA)
-        conn.commit()
-        logger.info("Database schema created successfully")
-    except Exception as e:
-        logger.error(f"Failed to create database schema: {e}")
-        raise
-    finally:
-        conn.close()
-
-
-def get_connection(db_path: Path) -> sqlite3.Connection:
-    """
-    Get a database connection with row factory.
-    
-    Args:
-        db_path: Path to the SQLite database file
-        
-    Returns:
-        SQLite connection with Row factory
-    """
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 
 def check_database_exists(db_path: Path) -> bool:
@@ -55,37 +13,92 @@ def check_database_exists(db_path: Path) -> bool:
     return db_path.exists()
 
 
-def get_table_counts(db_path: Path) -> dict:
+async def init_database_async() -> None:
+    """
+    Initialize database using SQLAlchemy.
+    
+    Creates all tables defined in the models.
+    For development/testing only - use Alembic migrations for production.
+    """
+    from .session import create_tables
+    await create_tables()
+    logger.info("Database initialized with SQLAlchemy")
+
+
+def init_database() -> None:
+    """
+    Sync wrapper for init_database_async.
+    
+    For use in sync contexts. Creates event loop if needed.
+    """
+    import asyncio
+    try:
+        loop = asyncio.get_running_loop()
+        # Already in async context, schedule as task
+        asyncio.ensure_future(init_database_async())
+    except RuntimeError:
+        # No running loop, create one
+        asyncio.run(init_database_async())
+
+
+async def get_table_counts_async() -> dict:
     """
     Get row counts for all tables.
     
     Returns:
         Dict with table names and row counts
     """
-    conn = get_connection(db_path)
-    try:
-        tables = [
-            'indicators', 'indicator_history', 'events', 'causal_analyses',
-            'investigations', 'investigation_evidence', 'topic_frequency',
-            'predictions', 'run_history', 'calendar_events', 'score_history'
-        ]
-        counts = {}
+    from sqlalchemy import text
+    from .session import get_session
+    
+    tables = [
+        'indicators', 'indicator_history', 'events', 'causal_analyses',
+        'investigations', 'investigation_evidence', 'topic_frequency',
+        'predictions', 'run_history', 'calendar_events', 'score_history'
+    ]
+    
+    counts = {}
+    async with get_session() as session:
         for table in tables:
             try:
-                cursor = conn.execute(f"SELECT COUNT(*) FROM {table}")
-                counts[table] = cursor.fetchone()[0]
-            except sqlite3.OperationalError:
+                result = await session.execute(
+                    text(f"SELECT COUNT(*) FROM {table}")
+                )
+                counts[table] = result.scalar()
+            except Exception:
                 counts[table] = 0
-        return counts
-    finally:
-        conn.close()
+    
+    return counts
 
 
-def vacuum_database(db_path: Path) -> None:
-    """Vacuum database to reclaim space."""
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute("VACUUM")
-        logger.info("Database vacuumed successfully")
-    finally:
-        conn.close()
+def run_migrations() -> None:
+    """
+    Run pending Alembic migrations.
+    
+    This is a convenience wrapper around Alembic upgrade command.
+    """
+    from alembic.config import Config
+    from alembic import command
+    from config import settings
+    
+    alembic_cfg = Config(settings.BASE_DIR / "alembic.ini")
+    command.upgrade(alembic_cfg, "head")
+    logger.info("Database migrations completed")
+
+
+def create_migration(message: str, autogenerate: bool = True) -> None:
+    """
+    Create a new Alembic migration.
+    
+    Args:
+        message: Migration description
+        autogenerate: Auto-generate from model changes
+    """
+    from alembic.config import Config
+    from alembic import command
+    from config import settings
+    
+    alembic_cfg = Config(settings.BASE_DIR / "alembic.ini")
+    command.revision(alembic_cfg, message=message, autogenerate=autogenerate)
+    logger.info(f"Created migration: {message}")
+

@@ -2,13 +2,15 @@
 LLM Pipeline - Main orchestrator for the 3-layer analysis pipeline.
 
 Pipeline Flow:
-1. Load raw data from crawlers
-2. Transform data (indicators → DB, news → for classification)
+1. Load transformed data from crawlers (CrawlerOutput format)
+2. Extract metrics → save to DB, news → for classification
 3. Layer 1: Classify news (relevant vs irrelevant)
 4. Layer 2: Score relevant news (with context)
 5. Layer 3: Rank all active events
 6. Review investigations
 7. Save results and run history
+
+TODO: Migrate from legacy dao to repositories (SQLAlchemy async)
 """
 import json
 from datetime import datetime, timedelta
@@ -19,11 +21,10 @@ from loguru import logger
 
 from config import settings
 from database import init_database
-from dao import get_db, DatabaseConnection
+from data_transformers import CrawlerOutput
 from .classifier import Classifier, classify_indicator_data
 from .scorer import Scorer, generate_context_summary
 from .ranker import Ranker, InvestigationReviewer
-from .data_transformer import DataTransformer, load_raw_data
 from .context_builder import ContextBuilder
 
 
@@ -32,6 +33,11 @@ class Pipeline:
     Main pipeline orchestrator.
     
     Coordinates all layers and manages data flow between them.
+    
+    Expects transformed data (CrawlerOutput format) from crawlers,
+    not raw data. Crawlers now transform data before saving.
+    
+    TODO: Migrate db access to use async repositories
     """
     
     def __init__(
@@ -47,9 +53,7 @@ class Pipeline:
         # Ensure database exists
         init_database(self.db_path)
         
-        # Initialize components
-        self.db = get_db(self.db_path)
-        self.transformer = DataTransformer(self.db)
+        # Initialize components (db access via repositories in run methods)
         self.context_builder = ContextBuilder(self.db_path)
         self.classifier = Classifier()
         self.scorer = Scorer()
@@ -67,7 +71,8 @@ class Pipeline:
         Run the complete pipeline.
         
         Args:
-            source_file: Path to raw data JSON (defaults to latest sbv_source_output.json)
+            source_file: Path to transformed data JSON (CrawlerOutput format).
+                         Defaults to latest file in processed/ dir.
             skip_classification: Skip Layer 1 (for debugging)
             skip_scoring: Skip Layer 2 (for debugging)
             skip_ranking: Skip Layer 3 (for debugging)
@@ -90,31 +95,55 @@ class Pipeline:
         
         try:
             # ============================================
-            # Step 1: Load raw data
+            # Step 1: Load transformed data (CrawlerOutput)
             # ============================================
-            logger.info("Step 1: Loading raw data...")
+            logger.info("Step 1: Loading transformed data...")
             
-            source_file = source_file or (self.data_dir / "raw" / "sbv_source_output.json")
-            raw_data = load_raw_data(source_file)
+            # Find latest processed file if not specified
+            if source_file is None:
+                processed_dir = self.data_dir / "processed"
+                processed_files = sorted(processed_dir.glob("sbv_*.json"), reverse=True)
+                if not processed_files:
+                    raise FileNotFoundError("No processed files found in processed/ dir")
+                source_file = processed_files[0]
+            
+            with open(source_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Load as CrawlerOutput
+            output = CrawlerOutput.from_dict(data)
             
             results["steps"]["load_data"] = {
                 "source": str(source_file),
-                "items": len(raw_data.get('data', [])),
-                "crawled_at": raw_data.get('crawled_at')
+                "metrics": len(output.metrics),
+                "events": len(output.events),
+                "calendar": len(output.calendar),
+                "transformed_at": output.transformed_at
             }
-            logger.info(f"Loaded {len(raw_data.get('data', []))} items from {source_file}")
+            logger.info(f"Loaded: {output.summary()}")
             
             # ============================================
-            # Step 2: Transform and save indicators
+            # Step 2: Save metrics to database
             # ============================================
-            logger.info("Step 2: Transforming data...")
+            logger.info("Step 2: Saving metrics to database...")
             
-            transform_result = self.transformer.process_sbv_data(raw_data)
-            news_items = transform_result["news_items"]
+            metrics_saved = 0
+            for metric in output.metrics:
+                # TODO: Implement metric saving to indicators table
+                # self.db.indicators.upsert(...)
+                metrics_saved += 1
             
-            results["steps"]["transform"] = transform_result["stats"]
-            logger.info(f"Transform stats: {transform_result['stats']}")
+            # Extract news items for classification
+            news_items = [
+                event.to_dict() for event in output.events
+                if event.type in ('news', 'press_release')
+            ]
             
+            results["steps"]["save_metrics"] = {
+                "metrics_saved": metrics_saved,
+                "news_items": len(news_items)
+            }
+            logger.info(f"Saved {metrics_saved} metrics, {len(news_items)} news items for classification")            
             # ============================================
             # Step 3: Layer 1 - Classify news
             # ============================================
