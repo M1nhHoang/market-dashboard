@@ -11,21 +11,22 @@ from database.init import run_migrations
 from utils import logger, init_logging
 from .routes import router
 
+# Run migrations BEFORE app starts (outside async context)
+init_logging(app_name="api")
+ensure_directories()
+
+try:
+    run_migrations()
+except Exception as e:
+    logger.error(f"Migration failed: {e}")
+    # Don't raise - let the app start anyway, migrations may have already been applied
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     # Startup
-    init_logging(app_name="api")
     logger.info("Starting API server")
-    ensure_directories()
-    
-    # Run pending migrations before starting
-    try:
-        run_migrations()
-    except Exception as e:
-        logger.error(f"Migration failed: {e}")
-        raise
     
     await init_engine()
     yield
