@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import ensure_directories
 from database import init_engine
+from database.init import run_migrations
 from utils import logger, init_logging
 from .routes import router
 
@@ -18,6 +19,14 @@ async def lifespan(app: FastAPI):
     init_logging(app_name="api")
     logger.info("Starting API server")
     ensure_directories()
+    
+    # Run pending migrations before starting
+    try:
+        run_migrations()
+    except Exception as e:
+        logger.error(f"Migration failed: {e}")
+        raise
+    
     await init_engine()
     yield
     # Shutdown
