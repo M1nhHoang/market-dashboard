@@ -15,11 +15,8 @@ from .routes import router
 init_logging(app_name="api")
 ensure_directories()
 
-try:
-    run_migrations()
-except Exception as e:
-    logger.error(f"Migration failed: {e}")
-    # Don't raise - let the app start anyway, migrations may have already been applied
+# Migration must succeed - if it fails, app should not start
+run_migrations()
 
 
 @asynccontextmanager

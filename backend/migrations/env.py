@@ -95,7 +95,22 @@ async def run_async_migrations() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
-    asyncio.run(run_async_migrations())
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop - safe to use asyncio.run()
+        asyncio.run(run_async_migrations())
+    else:
+        # Already in an async context - need to use nest_asyncio or run sync
+        # For simplicity, run synchronously using a sync engine
+        from sqlalchemy import create_engine
+        sync_url = config.get_main_option("sqlalchemy.url").replace("+aiosqlite", "")
+        connectable = create_engine(sync_url, poolclass=pool.NullPool)
+        
+        with connectable.connect() as connection:
+            do_run_migrations(connection)
+        
+        connectable.dispose()
 
 
 if context.is_offline_mode():

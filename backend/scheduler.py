@@ -176,6 +176,9 @@ def main():
     if args.verbose:
         logger.info("Verbose mode enabled")
     
+    # NOTE: Migrations are handled by backend service
+    # Scheduler depends_on backend:service_healthy, so migrations are already done
+    
     scheduler = MarketIntelligenceScheduler()
     
     if args.once:
