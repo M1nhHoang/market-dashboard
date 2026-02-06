@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile*
+.dockerignore
+
+# Data (will be mounted as volume)
+data/
+
+# Docs
+docs/
+*.md
+!prompts/*.md
+
+# Tests
+tests/
+pytest.ini
+
+# GitHub
+.github/
+
+# Misc
+.env
+.env.*
+*.log

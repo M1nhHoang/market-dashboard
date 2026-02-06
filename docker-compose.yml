@@ -1,0 +1,76 @@
+# ============================================
+# Market Intelligence Dashboard - Docker Compose
+# ============================================
+# Usage:
+#   docker compose up -d              # Start all services
+#   docker compose up -d --build      # Rebuild and start
+#   docker compose logs -f backend    # Follow backend logs
+#   docker compose down               # Stop all services
+# ============================================
+
+services:
+  # --- FastAPI Backend (API server) ---
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend
+    container_name: mi-backend
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8000}:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_PATH=/app/data/market.db
+    volumes:
+      # Persist SQLite database and data files
+      - mi-data:/app/data
+      # Mount templates so they can be updated without rebuild
+      - ./backend/templates:/app/templates:ro
+    networks:
+      - mi-network
+
+  # --- Scheduler / Worker (crawlers + LLM pipeline) ---
+  scheduler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend
+    container_name: mi-scheduler
+    restart: unless-stopped
+    command: ["python", "scheduler.py"]
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_PATH=/app/data/market.db
+    volumes:
+      # Share the same data volume as backend
+      - mi-data:/app/data
+      - ./backend/templates:/app/templates:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - mi-network
+
+  # --- React Frontend (Nginx) ---
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mi-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - mi-network
+
+volumes:
+  mi-data:
+    driver: local
+
+networks:
+  mi-network:
+    driver: bridge

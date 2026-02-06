@@ -1,0 +1,51 @@
+# ============================================
+# Backend Dockerfile - FastAPI + Python 3.11
+# ============================================
+FROM python:3.11-slim AS base
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# Install system dependencies (needed for lxml, pymupdf, etc.)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for layer caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application source
+COPY config.py scheduler.py alembic.ini ./
+COPY api/ api/
+COPY constants/ constants/
+COPY crawlers/ crawlers/
+COPY data_transformers/ data_transformers/
+COPY database/ database/
+COPY llm/ llm/
+COPY migrations/ migrations/
+COPY processor/ processor/
+COPY prompts/ prompts/
+COPY repositories/ repositories/
+COPY templates/ templates/
+
+# Create data directories
+RUN mkdir -p data/raw data/processed data/context
+
+# Expose FastAPI port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD python -c "import httpx; r = httpx.get('http://localhost:8000/api/health'); r.raise_for_status()" || exit 1
+
+# Default: run API server
+# Override with scheduler.py for the worker service
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
