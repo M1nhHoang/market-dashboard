@@ -12,14 +12,12 @@ Usage:
 import asyncio
 import sys
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from loguru import logger
 
 from config import settings, ensure_directories
+from utils import logger, init_logging
 
 
 class MarketIntelligenceScheduler:
@@ -174,10 +172,9 @@ def main():
     args = parser.parse_args()
     
     # Configure logging
+    init_logging(app_name="scheduler")
     if args.verbose:
-        logger.add(sys.stderr, level="DEBUG")
-    else:
-        logger.add(sys.stderr, level="INFO")
+        logger.info("Verbose mode enabled")
     
     scheduler = MarketIntelligenceScheduler()
     

@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # Paths
     BASE_DIR: Path = Path(__file__).parent
     DATA_DIR: Path = Field(default_factory=lambda: Path(__file__).parent / "data")
+    LOG_DIR: Path = Field(default_factory=lambda: Path(__file__).parent / "data" / "logs")
     DATABASE_PATH: Path = Field(default_factory=lambda: Path(__file__).parent / "data" / "market.db")
     
     # API Keys
@@ -52,6 +53,7 @@ def ensure_directories():
         settings.DATA_DIR / "raw",
         settings.DATA_DIR / "processed",
         settings.DATA_DIR / "context",
+        settings.LOG_DIR,
     ]
     for dir_path in dirs:
         dir_path.mkdir(parents=True, exist_ok=True)

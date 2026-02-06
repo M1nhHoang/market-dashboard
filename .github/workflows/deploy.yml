@@ -5,8 +5,10 @@
 #
 # Required GitHub Secrets:
 #   DEPLOY_PASSWORD  - SSH password for root@VPS
-#   ENV_FILE         - Contents of backend/.env (API keys, etc.)
 #   GH_PAT           - GitHub Personal Access Token (for private repo)
+#
+# Note: backend/.env is managed manually on VPS.
+#       First deploy will copy from .env.example
 # ============================================
 
 name: Deploy to VPS
@@ -20,8 +22,6 @@ env:
   DEPLOY_HOST: 160.191.86.48
   DEPLOY_USER: root
   DEPLOY_PATH: /root/minhhoang/market-dashboard
-  # Token embedded for VPS to clone/pull private repo
-  REPO_URL: https://${{ secrets.GH_PAT }}@github.com/M1nhHoang/market-dashboard.git
 
 jobs:
   deploy:
@@ -32,16 +32,20 @@ jobs:
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         with:
           host: ${{ env.DEPLOY_HOST }}
           username: ${{ env.DEPLOY_USER }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
+          envs: GH_PAT
           script_stop: true
           command_timeout: 10m
           script: |
             set -e
 
             DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
+            REPO_URL="https://${GH_PAT}@github.com/M1nhHoang/market-dashboard.git"
 
             echo "=========================================="
             echo "🚀 Deploying Market Intelligence Dashboard"
@@ -53,10 +57,11 @@ jobs:
             if [ ! -d "$DEPLOY_PATH/.git" ]; then
               echo "📦 First deploy - cloning repository..."
               mkdir -p "$(dirname $DEPLOY_PATH)"
-              git clone ${{ env.REPO_URL }} "$DEPLOY_PATH"
+              git clone "$REPO_URL" "$DEPLOY_PATH"
             else
               echo "📥 Pulling latest changes..."
               cd "$DEPLOY_PATH"
+              git remote set-url origin "$REPO_URL"
               git fetch origin master
               git reset --hard origin/master
             fi
@@ -65,14 +70,15 @@ jobs:
             echo "📍 Current commit: $(git log --oneline -1)"
 
             # ------------------------------------------
-            # 2. Write backend/.env from GitHub Secret
+            # 2. Create backend/.env from example if not exists
             # ------------------------------------------
-            echo "🔑 Writing environment file..."
-            cat > backend/.env << 'ENVEOF'
-            ${{ secrets.ENV_FILE }}
-            ENVEOF
-            # Remove leading whitespace from heredoc
-            sed -i 's/^[[:space:]]*//' backend/.env
+            if [ ! -f backend/.env ]; then
+              echo "🔑 Creating backend/.env from .env.example..."
+              cp backend/.env.example backend/.env
+              echo "⚠️  Please edit backend/.env on VPS with your API keys!"
+            else
+              echo "✅ backend/.env already exists, skipping..."
+            fi
 
             # ------------------------------------------
             # 3. Build and deploy with Docker Compose

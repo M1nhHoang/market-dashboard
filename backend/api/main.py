@@ -5,8 +5,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import settings, ensure_directories
-from database import init_database_async, init_engine
+from config import ensure_directories
+from database import init_engine
+from utils import logger, init_logging
 from .routes import router
 
 
@@ -14,11 +15,13 @@ from .routes import router
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     # Startup
+    init_logging(app_name="api")
+    logger.info("Starting API server")
     ensure_directories()
-    await init_engine()  # Initialize DB engine
+    await init_engine()
     yield
     # Shutdown
-    pass
+    logger.info("Shutting down API server")
 
 
 app = FastAPI(
