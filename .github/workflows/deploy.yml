@@ -1,0 +1,114 @@
+# ============================================
+# Deploy to VPS via SSH + Docker Compose
+# ============================================
+# Trigger: Push to master branch
+#
+# Required GitHub Secrets:
+#   DEPLOY_PASSWORD  - SSH password for root@VPS
+#   ENV_FILE         - Contents of backend/.env (API keys, etc.)
+#   GH_PAT           - GitHub Personal Access Token (for private repo)
+# ============================================
+
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch: # Allow manual trigger
+
+env:
+  DEPLOY_HOST: 160.191.86.48
+  DEPLOY_USER: root
+  DEPLOY_PATH: /root/minhhoang/market-dashboard
+  # Token embedded for VPS to clone/pull private repo
+  REPO_URL: https://${{ secrets.GH_PAT }}@github.com/M1nhHoang/market-dashboard.git
+
+jobs:
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ env.DEPLOY_HOST }}
+          username: ${{ env.DEPLOY_USER }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          script_stop: true
+          command_timeout: 10m
+          script: |
+            set -e
+
+            DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
+
+            echo "=========================================="
+            echo "🚀 Deploying Market Intelligence Dashboard"
+            echo "=========================================="
+
+            # ------------------------------------------
+            # 1. Clone or pull latest code
+            # ------------------------------------------
+            if [ ! -d "$DEPLOY_PATH/.git" ]; then
+              echo "📦 First deploy - cloning repository..."
+              mkdir -p "$(dirname $DEPLOY_PATH)"
+              git clone ${{ env.REPO_URL }} "$DEPLOY_PATH"
+            else
+              echo "📥 Pulling latest changes..."
+              cd "$DEPLOY_PATH"
+              git fetch origin master
+              git reset --hard origin/master
+            fi
+
+            cd "$DEPLOY_PATH"
+            echo "📍 Current commit: $(git log --oneline -1)"
+
+            # ------------------------------------------
+            # 2. Write backend/.env from GitHub Secret
+            # ------------------------------------------
+            echo "🔑 Writing environment file..."
+            cat > backend/.env << 'ENVEOF'
+            ${{ secrets.ENV_FILE }}
+            ENVEOF
+            # Remove leading whitespace from heredoc
+            sed -i 's/^[[:space:]]*//' backend/.env
+
+            # ------------------------------------------
+            # 3. Build and deploy with Docker Compose
+            # ------------------------------------------
+            echo "🐳 Building and deploying containers..."
+            docker compose down --remove-orphans || true
+            docker compose up -d --build
+
+            # ------------------------------------------
+            # 4. Wait for health check
+            # ------------------------------------------
+            echo "⏳ Waiting for backend to be healthy..."
+            RETRIES=20
+            DELAY=5
+            for i in $(seq 1 $RETRIES); do
+              if docker inspect --format='{{.State.Health.Status}}' mi-backend 2>/dev/null | grep -q "healthy"; then
+                echo "✅ Backend is healthy!"
+                break
+              fi
+              if [ $i -eq $RETRIES ]; then
+                echo "❌ Backend health check failed after ${RETRIES} attempts"
+                echo "--- Backend logs ---"
+                docker compose logs --tail=50 backend
+                exit 1
+              fi
+              echo "   Attempt $i/$RETRIES - waiting ${DELAY}s..."
+              sleep $DELAY
+            done
+
+            # ------------------------------------------
+            # 5. Verify all services
+            # ------------------------------------------
+            echo ""
+            echo "=========================================="
+            echo "📊 Service Status"
+            echo "=========================================="
+            docker compose ps
+            echo ""
+            echo "✅ Deploy completed successfully!"
