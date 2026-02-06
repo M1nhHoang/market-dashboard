@@ -19,6 +19,7 @@ from .indicators import IndicatorRepository
 from .events import EventRepository
 from .investigations import InvestigationRepository
 from .run_history import RunHistoryRepository
+from .llm_history import LLMHistoryRepository
 
 __all__ = [
     "BaseRepository",
@@ -26,4 +27,5 @@ __all__ = [
     "EventRepository",
     "InvestigationRepository",
     "RunHistoryRepository",
+    "LLMHistoryRepository",
 ]

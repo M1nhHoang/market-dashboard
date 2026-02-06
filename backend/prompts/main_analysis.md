@@ -1,4 +1,4 @@
-# Main Analysis Prompt
+# Prompt Phân Tích Chính
 
 Bạn là chuyên gia phân tích tài chính vĩ mô Việt Nam và thế giới.
 
@@ -14,7 +14,7 @@ Bạn là chuyên gia phân tích tài chính vĩ mô Việt Nam và thế giớ
 ### Chỉ số hiện tại:
 {current_indicators}
 
-### Causal Templates (các chuỗi nhân quả đã biết):
+### Mẫu nhân quả (các chuỗi nguyên nhân-kết quả đã biết):
 {causal_templates}
 
 ### Các điểm đang cần điều tra (từ những ngày trước):

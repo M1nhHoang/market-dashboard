@@ -1,18 +1,18 @@
-# Investigation Review Prompt
+# Prompt Rà Soát Điều Tra
 
-You are reviewing open investigations for status updates.
+Bạn đang rà soát các cuộc điều tra còn mở để cập nhật trạng thái.
 
-## TODAY'S DATE
+## NGÀY HÔM NAY
 {today}
 
-## OPEN INVESTIGATIONS
+## CÁC CUỘC ĐIỀU TRA ĐANG MỞ
 {open_investigations}
 
-## TODAY'S NEWS (already scored)
+## TIN TỨC HÔM NAY (đã được chấm điểm)
 {todays_events}
 
-## TASK
-Review each investigation and determine updates. Output JSON only:
+## NHIỆM VỤ
+Rà soát từng cuộc điều tra và xác định cập nhật. Chỉ trả về JSON:
 
 ```json
 {{
@@ -25,26 +25,26 @@ Review each investigation and determine updates. Output JSON only:
         {{
           "event_id": "evt_xxx",
           "evidence_type": "supports|contradicts|neutral",
-          "summary": "What this evidence shows..."
+          "summary": "Bằng chứng này cho thấy..."
         }}
       ],
-      "reasoning": "Why this status"
+      "reasoning": "Lý do trạng thái này"
     }}
   ]
 }}
 ```
 
-## STATUS DEFINITIONS
-- **open**: No new evidence, continue monitoring
-- **updated**: New evidence found, but not conclusive
-- **resolved**: Clear answer found
-- **stale**: No updates for 14+ days, consider closing
-- **escalated**: Conflicting evidence, needs human review
+## ĐỊNH NGHĨA TRẠNG THÁI
+- **open**: Chưa có bằng chứng mới, tiếp tục theo dõi
+- **updated**: Tìm thấy bằng chứng mới, nhưng chưa đủ kết luận
+- **resolved**: Đã tìm được câu trả lời rõ ràng
+- **stale**: Không có cập nhật trên 14 ngày, xem xét đóng
+- **escalated**: Bằng chứng mâu thuẫn, cần con người xem xét
 
-## RULES
-- Only mark "resolved" if evidence clearly answers the question
-- "updated" requires actual new information, not just related news
-- After 14 days with no updates → recommend stale
-- If evidence conflicts → escalate for human review
+## QUY TẮC
+- Chỉ đánh dấu "resolved" nếu bằng chứng trả lời rõ ràng câu hỏi
+- "updated" yêu cầu thông tin mới thực sự, không chỉ là tin liên quan
+- Sau 14 ngày không có cập nhật → đề xuất stale
+- Nếu bằng chứng mâu thuẫn → escalate để con người xem xét
 
-Output ONLY the JSON object.
+Chỉ trả về đối tượng JSON.

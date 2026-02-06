@@ -2,11 +2,17 @@
 LLM Module - Unified interface for LLM providers.
 
 Usage:
-    from llm import get_client
+    from llm import get_client, set_llm_context
+    
+    # Set context for logging
+    set_llm_context(task_type="classification", run_id="run_20260207")
     
     client = get_client()  # Uses config settings
     response = client.generate("Your prompt here")
     print(response.content)
+    
+    # Flush logs to database
+    await client.flush_logs_async()
 
 Supported providers:
 - glm: Z.AI GLM-4.7 via OpenAI-compatible API
@@ -14,7 +20,7 @@ Supported providers:
 from typing import Optional
 
 from config import settings
-from .base import LLMClient, LLMResponse, Message
+from .base import LLMClient, LLMResponse, Message, LLMCallRecord, set_llm_context, get_llm_context
 from .glm import GLMClient
 
 
@@ -84,6 +90,9 @@ __all__ = [
     "get_client",
     "LLMClient",
     "LLMResponse",
+    "LLMCallRecord",
     "Message",
     "GLMClient",
+    "set_llm_context",
+    "get_llm_context",
 ]

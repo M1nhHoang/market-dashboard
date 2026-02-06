@@ -4,6 +4,7 @@ GLM Client - Z.AI GLM-4.7 implementation.
 Uses OpenAI-compatible API from Z.AI.
 API docs: https://docs.z.ai/guides/develop/openai/python
 """
+import time
 from typing import Optional, List
 
 import httpx
@@ -34,7 +35,8 @@ class GLMClient(LLMClient):
         api_key: str, 
         model: str = "glm-4.7",
         timeout: float = 120.0,
-        verify_ssl: bool = True
+        verify_ssl: bool = True,
+        enable_logging: bool = True
     ):
         """
         Initialize GLM client.
@@ -44,8 +46,9 @@ class GLMClient(LLMClient):
             model: Model name (glm-4.7, glm-4.5-air, etc.)
             timeout: Request timeout in seconds
             verify_ssl: Whether to verify SSL certificates (disable for dev if needed)
+            enable_logging: Whether to log calls for fine-tuning dataset
         """
-        super().__init__(api_key, model)
+        super().__init__(api_key, model, enable_logging=enable_logging)
         self.timeout = timeout
         
         # Create custom httpx client if SSL verification needs to be disabled
@@ -93,6 +96,9 @@ class GLMClient(LLMClient):
         
         logger.debug(f"GLM request: model={self.model}, messages={len(api_messages)}")
         
+        # Track latency
+        start_time = time.perf_counter()
+        
         try:
             response = self._client.chat.completions.create(
                 model=self.model,
@@ -101,11 +107,14 @@ class GLMClient(LLMClient):
                 temperature=temperature,
             )
             
+            # Calculate latency
+            latency_ms = int((time.perf_counter() - start_time) * 1000)
+            
             # Parse response
             choice = response.choices[0]
             usage = response.usage
             
-            return LLMResponse(
+            llm_response = LLMResponse(
                 content=choice.message.content,
                 model=response.model,
                 usage={
@@ -113,7 +122,19 @@ class GLMClient(LLMClient):
                     "output_tokens": usage.completion_tokens if usage else 0,
                 },
                 stop_reason=choice.finish_reason,
+                latency_ms=latency_ms,
             )
+            
+            # Log the call for fine-tuning dataset
+            self.log_call(
+                messages=messages,
+                system=system,
+                response=llm_response,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+            
+            return llm_response
             
         except Exception as e:
             logger.error(f"GLM request failed: {e}")
