@@ -45,7 +45,26 @@ jobs:
             set -e
 
             DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
-            REPO_URL="https://${GH_PAT}@github.com/M1nhHoang/market-dashboard.git"
+
+            # ------------------------------------------
+            # 0. Check prerequisites
+            # ------------------------------------------
+            echo "🔍 Checking prerequisites..."
+            command -v git >/dev/null 2>&1 || { echo "❌ git is not installed"; exit 1; }
+            command -v docker >/dev/null 2>&1 || { echo "❌ docker is not installed"; exit 1; }
+            docker compose version >/dev/null 2>&1 || { echo "❌ docker compose is not installed"; exit 1; }
+            echo "   git: $(git --version)"
+            echo "   docker: $(docker --version)"
+            echo "   compose: $(docker compose version)"
+
+            # Build repo URL - with or without token
+            if [ -n "${GH_PAT}" ]; then
+              REPO_URL="https://${GH_PAT}@github.com/M1nhHoang/market-dashboard.git"
+              echo "🔑 Using authenticated git URL"
+            else
+              REPO_URL="https://github.com/M1nhHoang/market-dashboard.git"
+              echo "🔑 Using public git URL (no GH_PAT set)"
+            fi
 
             echo "=========================================="
             echo "🚀 Deploying Market Intelligence Dashboard"
@@ -54,30 +73,42 @@ jobs:
             # ------------------------------------------
             # 1. Clone or pull latest code
             # ------------------------------------------
-            if [ ! -d "$DEPLOY_PATH/.git" ]; then
-              echo "📦 First deploy - cloning repository..."
-              mkdir -p "$(dirname $DEPLOY_PATH)"
-              git clone "$REPO_URL" "$DEPLOY_PATH"
+            echo "📂 Deploy path: $DEPLOY_PATH"
+            echo "📂 Checking if path exists..."
+
+            if [ -d "$DEPLOY_PATH" ]; then
+              echo "   Directory exists"
+              if [ -d "$DEPLOY_PATH/.git" ]; then
+                echo "📥 Pulling latest changes..."
+                cd "$DEPLOY_PATH"
+                git remote set-url origin "$REPO_URL"
+                git fetch origin master 2>&1
+                git reset --hard origin/master 2>&1
+              else
+                echo "⚠️  Directory exists but not a git repo, removing..."
+                rm -rf "$DEPLOY_PATH"
+                echo "📦 Cloning repository..."
+                mkdir -p "$(dirname "$DEPLOY_PATH")"
+                git clone "$REPO_URL" "$DEPLOY_PATH" 2>&1
+              fi
             else
-              echo "📥 Pulling latest changes..."
-              cd "$DEPLOY_PATH"
-              git remote set-url origin "$REPO_URL"
-              git fetch origin master
-              git reset --hard origin/master
+              echo "📦 First deploy - cloning repository..."
+              mkdir -p "$(dirname "$DEPLOY_PATH")"
+              git clone "$REPO_URL" "$DEPLOY_PATH" 2>&1
             fi
 
             cd "$DEPLOY_PATH"
             echo "📍 Current commit: $(git log --oneline -1)"
 
             # ------------------------------------------
-            # 2. Create backend/.env from example if not exists
+            # 2. Check backend/.env
             # ------------------------------------------
-            if [ ! -f backend/.env ]; then
-              echo "🔑 Creating backend/.env from .env.example..."
-              cp backend/.env.example backend/.env
-              echo "⚠️  Please edit backend/.env on VPS with your API keys!"
+            if [ -f backend/.env ]; then
+              echo "✅ backend/.env exists."
             else
-              echo "✅ backend/.env already exists, skipping..."
+              echo "⚠️  backend/.env NOT FOUND in $(pwd)/backend/"
+              echo "    Listing backend contents:"
+              ls -la backend/ || echo "    backend/ directory missing"
             fi
 
             # ------------------------------------------
