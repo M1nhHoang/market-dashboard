@@ -13,7 +13,7 @@ services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile.backend
+      dockerfile: Dockerfile
     container_name: mi-backend
     restart: unless-stopped
     ports:
@@ -34,7 +34,7 @@ services:
   scheduler:
     build:
       context: ./backend
-      dockerfile: Dockerfile.backend
+      dockerfile: Dockerfile
     container_name: mi-scheduler
     restart: unless-stopped
     command: ["python", "scheduler.py"]
