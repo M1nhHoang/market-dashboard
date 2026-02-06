@@ -115,26 +115,46 @@ class IndicatorRepository(BaseRepository[Indicator]):
         record_date: date,
         source: str = None,
         volume: float = None,
+        update_if_exists: bool = True,
     ) -> Optional[IndicatorHistory]:
         """
         Add indicator history record if value changed.
         
         Prevents duplicates by checking existing records.
+        If update_if_exists=True and a record exists for the same date,
+        updates the existing record instead of creating a new one.
         
         Returns:
-            Created history record, or None if duplicate
+            Created/updated history record, or None if unchanged
         """
-        # Check for existing record with same value on same date
+        # Check for existing record on same date
         stmt = select(IndicatorHistory).where(
             and_(
                 IndicatorHistory.indicator_id == indicator_id,
                 IndicatorHistory.date == record_date,
-                IndicatorHistory.value == value,
             )
         )
         result = await self.session.execute(stmt)
-        if result.scalar_one_or_none():
-            return None  # Duplicate
+        existing = result.scalar_one_or_none()
+        
+        if existing:
+            if existing.value == value:
+                return None  # Same value, no change needed
+            
+            if update_if_exists:
+                # Update existing record with new value
+                existing.previous_value = existing.value
+                existing.value = value
+                if existing.previous_value and existing.previous_value != 0:
+                    existing.change = value - existing.previous_value
+                    existing.change_pct = (existing.change / abs(existing.previous_value)) * 100
+                existing.volume = volume
+                existing.recorded_at = self.now()
+                existing.source = source or existing.source
+                await self.session.flush()
+                return existing
+            else:
+                return None  # Record exists, don't create duplicate
         
         # Get previous value for change calculation
         previous = await self.get_latest_history(indicator_id)
