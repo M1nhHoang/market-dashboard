@@ -618,7 +618,15 @@ class Pipeline:
         try:
             logger.info("Crawling SBV...")
             crawler = SBVCrawler(data_dir=self.data_dir)
-            raw_result = await crawler.fetch()
+            
+            # Use run() instead of fetch() to get full article content + PDF extraction
+            # max_articles=None means fetch ALL articles (default behavior)
+            # For faster runs during development, you can set max_articles=5
+            raw_result = await crawler.run(
+                max_articles=None,  # Fetch all articles with full content
+                extract_pdf=True,   # Extract text from PDF attachments
+                save_raw=False       # Save raw output to data/raw for debugging
+            )
             
             if raw_result.success:
                 # Transform using crawler's transformer

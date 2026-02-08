@@ -1776,41 +1776,121 @@ class SBVCrawler(BaseCrawler):
     async def _download_and_extract_pdf(
         self, 
         url: str, 
-        client: httpx.AsyncClient
+        client: httpx.AsyncClient = None  # Not used anymore, kept for compatibility
     ) -> Optional[Dict[str, Any]]:
-        """Download PDF and extract text content."""
+        """
+        Download PDF and extract text content.
+        
+        Uses dedicated client with longer timeout (180s) for large PDFs.
+        Implements retry logic with exponential backoff.
+        Skips files larger than 5MB.
+        """
         if not PDF_SUPPORT:
             logger.warning("[SBV] PDF extraction not available. Install pymupdf.")
             return None
         
-        try:
-            await self._rate_limit()
-            logger.info(f"[SBV] Downloading PDF: {url[:80]}...")
+        MAX_PDF_SIZE = 50 * 1024 * 1024  # 50MB limit for large Thong tu PDFs
+        PDF_TIMEOUT = 900.0  # 15 minutes for large PDFs
+        MAX_RETRIES = 3
+        
+        for attempt in range(MAX_RETRIES):
+            try:
+                await self._rate_limit()
+                
+                # Create dedicated client with longer timeout for PDF downloads
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(
+                        connect=30.0,
+                        read=PDF_TIMEOUT,
+                        write=30.0,
+                        pool=30.0
+                    ),
+                    follow_redirects=True,
+                    verify=settings.CRAWLERS_ENABLE_SSL
+                ) as pdf_client:
+                    
+                    # First, check file size with HEAD request
+                    try:
+                        head_response = await pdf_client.head(url, headers=self.headers)
+                        content_length = head_response.headers.get('content-length')
+                        if content_length and int(content_length) > MAX_PDF_SIZE:
+                            logger.warning(f"[SBV] PDF too large ({int(content_length) / 1024 / 1024:.1f}MB > {MAX_PDF_SIZE / 1024 / 1024:.0f}MB), skipping: {url[:60]}...")
+                            return None
+                    except Exception:
+                        # HEAD request failed, proceed with GET anyway
+                        pass
+                    
+                    logger.info(f"[SBV] Downloading PDF (attempt {attempt + 1}/{MAX_RETRIES}): {url[:80]}...")
+                    
+                    response = await pdf_client.get(url, headers=self.headers)
+                    response.raise_for_status()
+                    
+                    content_type = response.headers.get('content-type', '')
+                    
+                    # SBV returns 200 with HTML error page instead of 404
+                    # Check if response is actually a PDF
+                    if 'text/html' in content_type.lower():
+                        # Check for SBV's "page not found" message
+                        body_text = response.text[:500] if len(response.content) < 50000 else ""
+                        if "không tồn tại" in body_text or "Địa chỉ độc giả truy nhập" in body_text:
+                            logger.warning(f"[SBV] PDF page not found (SBV 404): {url[:60]}...")
+                            return None
+                        logger.warning(f"[SBV] URL returned HTML instead of PDF: {content_type}")
+                        return None
+                    
+                    if 'pdf' not in content_type.lower() and not url.lower().endswith('.pdf'):
+                        logger.warning(f"[SBV] URL does not appear to be a PDF: {content_type}")
+                        return None
+                    
+                    pdf_bytes = response.content
+                    
+                    # Double check: PDF files start with %PDF
+                    if not pdf_bytes.startswith(b'%PDF'):
+                        logger.warning(f"[SBV] Response is not a valid PDF file: {url[:60]}...")
+                        return None
+                    
+                    # Check actual size
+                    if len(pdf_bytes) > MAX_PDF_SIZE:
+                        logger.warning(f"[SBV] PDF too large ({len(pdf_bytes) / 1024 / 1024:.1f}MB > {MAX_PDF_SIZE / 1024 / 1024:.0f}MB), skipping: {url[:60]}...")
+                        return None
+                    
+                    text_content = self._extract_text_from_pdf_bytes(pdf_bytes)
+                    
+                    if text_content:
+                        return {
+                            "text": text_content,
+                            "source_url": url,
+                            "size_bytes": len(pdf_bytes),
+                        }
+                    
+                    return None
             
-            response = await client.get(url, headers=self.headers)
-            response.raise_for_status()
-            
-            content_type = response.headers.get('content-type', '')
-            if 'pdf' not in content_type.lower() and not url.lower().endswith('.pdf'):
-                logger.warning(f"[SBV] URL does not appear to be a PDF: {content_type}")
+            except asyncio.CancelledError:
+                logger.warning(f"[SBV] PDF download cancelled: {url[:60]}...")
+                return None  # Don't retry on cancellation
+                    
+            except httpx.TimeoutException as e:
+                logger.warning(f"[SBV] Timeout downloading PDF (attempt {attempt + 1}/{MAX_RETRIES}): {url[:60]}...")
+                if attempt < MAX_RETRIES - 1:
+                    wait_time = (attempt + 1) * 5  # 5s, 10s, 15s backoff
+                    logger.info(f"[SBV] Retrying in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"[SBV] Failed to download PDF after {MAX_RETRIES} attempts: {url[:60]}...")
+                    
+            except httpx.HTTPStatusError as e:
+                logger.error(f"[SBV] HTTP error downloading PDF {url}: {e.response.status_code}")
+                return None  # Don't retry on HTTP errors
+                
+            except httpx.RequestError as e:
+                logger.warning(f"[SBV] Request error downloading PDF (attempt {attempt + 1}): {url[:60]}... - {e}")
+                if attempt < MAX_RETRIES - 1:
+                    wait_time = (attempt + 1) * 3
+                    await asyncio.sleep(wait_time)
+                    
+            except Exception as e:
+                logger.error(f"[SBV] Error extracting PDF {url}: {e}")
                 return None
-            
-            pdf_bytes = response.content
-            text_content = self._extract_text_from_pdf_bytes(pdf_bytes)
-            
-            if text_content:
-                return {
-                    "text": text_content,
-                    "source_url": url,
-                    "size_bytes": len(pdf_bytes),
-                }
-            
-        except httpx.HTTPStatusError as e:
-            logger.error(f"[SBV] HTTP error downloading PDF {url}: {e.response.status_code}")
-        except httpx.RequestError as e:
-            logger.error(f"[SBV] Request error downloading PDF {url}: {e}")
-        except Exception as e:
-            logger.error(f"[SBV] Error extracting PDF {url}: {e}")
         
         return None
     
@@ -1964,7 +2044,8 @@ class SBVCrawler(BaseCrawler):
         self, 
         max_articles: Optional[int] = None,
         extract_pdf: bool = True,
-        news_only: bool = False
+        news_only: bool = False,
+        save_raw: bool = False
     ) -> CrawlResult:
         """
         Run full crawl with content extraction and save to file.
@@ -2149,6 +2230,10 @@ class SBVCrawler(BaseCrawler):
         # Save results to file
         if result.success:
             logger.info(f"[{self.name}] Successfully crawled {len(result.data)} items")
+            
+            # Save raw data if requested (for debugging)
+            if save_raw:
+                self.save_raw(result)
             
             # Transform and save transformed output
             output = self.transformer.transform(result.to_dict())

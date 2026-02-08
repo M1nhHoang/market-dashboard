@@ -548,17 +548,38 @@ class SBVTransformer(BaseTransformer):
         elif any("Văn bản" in cat for cat in categories):
             event_type = EventType.CIRCULAR
         
+        # Build content: HTML content + PDF text content
+        content_parts = []
+        html_content = item.get("content", "")
+        if html_content:
+            content_parts.append(html_content)
+        
+        # Append PDF text content if available
+        pdf_content = item.get("pdf_content", [])
+        for pdf in pdf_content:
+            if isinstance(pdf, dict):
+                pdf_text = pdf.get("text", "")
+                if pdf_text:
+                    pdf_name = pdf.get("name", "PDF Attachment")
+                    content_parts.append(f"\n\n--- {pdf_name} ---\n{pdf_text}")
+        
+        # Combine all content
+        full_content = "".join(content_parts) if content_parts else None
+        
+        # Determine if we have meaningful content
+        has_content = bool(full_content and len(full_content) > 100)
+        
         return EventRecord(
             event_type=event_type,
             title=title,
             summary=item.get("summary"),
-            content=item.get("content"),
+            content=full_content,
             published_at=published_at,
             source=item.get("source", "SBV"),
             source_url=item.get("source_url"),
             language="vi",
             categories=categories,
-            has_full_content=item.get("fetch_success", False),
+            has_full_content=has_content,
             attachments=self._parse_attachments(item),
         )
     
