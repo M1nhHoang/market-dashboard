@@ -23,41 +23,41 @@ services:
     environment:
       - DATABASE_PATH=/app/data/market.db
     volumes:
-      # Persist SQLite database and data files
-      - mi-data:/app/data
+      # Persist SQLite database, data files, and logs (bind mount for direct access)
+      - ./backend/data:/app/data
       # Mount templates so they can be updated without rebuild
       - ./backend/templates:/app/templates:ro
     networks:
       - mi-network
 
   # --- Scheduler / Worker (crawlers + LLM pipeline) ---
-  scheduler:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: mi-scheduler
-    restart: unless-stopped
-    command: ["python", "scheduler.py"]
-    env_file:
-      - ./backend/.env
-    environment:
-      - DATABASE_PATH=/app/data/market.db
-    volumes:
-      # Share the same data volume as backend
-      - mi-data:/app/data
-      - ./backend/templates:/app/templates:ro
-    depends_on:
-      backend:
-        condition: service_healthy
-    networks:
-      - mi-network
-    # Override healthcheck - scheduler has no HTTP server
-    healthcheck:
-      test: ["CMD", "pgrep", "-f", "scheduler.py"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+  # scheduler:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile
+  #   container_name: mi-scheduler
+  #   restart: unless-stopped
+  #   command: ["python", "scheduler.py"]
+  #   env_file:
+  #     - ./backend/.env
+  #   environment:
+  #     - DATABASE_PATH=/app/data/market.db
+  #   volumes:
+  #     # Share the same data directory as backend (bind mount)
+  #     - ./backend/data:/app/data
+  #     - ./backend/templates:/app/templates:ro
+  #   depends_on:
+  #     backend:
+  #       condition: service_healthy
+  #   networks:
+  #     - mi-network
+  #   # Override healthcheck - scheduler has no HTTP server
+  #   healthcheck:
+  #     test: ["CMD", "pgrep", "-f", "scheduler.py"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 10s
 
   # --- React Frontend (Nginx) ---
   frontend:
@@ -74,9 +74,7 @@ services:
     networks:
       - mi-network
 
-volumes:
-  mi-data:
-    driver: local
+# No named volumes needed - using bind mounts for data persistence
 
 networks:
   mi-network:

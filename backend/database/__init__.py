@@ -13,7 +13,12 @@ Structure:
         ├── base.py
         ├── indicators.py
         ├── events.py
-        ├── investigations.py
+        ├── insights/      # Signals, Themes, Watchlist module
+        │   ├── __init__.py
+        │   ├── signal.py
+        │   ├── theme.py
+        │   ├── watchlist.py
+        │   └── signal_accuracy_stats.py
         └── system.py
 
 Usage:
@@ -40,10 +45,11 @@ from .models import (
     CausalAnalysis,
     TopicFrequency,
     ScoreHistory,
-    # Investigations
-    Investigation,
-    InvestigationEvidence,
-    Prediction,
+    # Insights (Signals, Themes, Watchlist)
+    Signal,
+    Theme,
+    Watchlist,
+    SignalAccuracyStats,
     # System
     RunHistory,
     CalendarEvent,
@@ -87,9 +93,11 @@ __all__ = [
     "CausalAnalysis",
     "TopicFrequency",
     "ScoreHistory",
-    "Investigation",
-    "InvestigationEvidence",
-    "Prediction",
+    # Insights (Signals, Themes, Watchlist)
+    "Signal",
+    "Theme",
+    "Watchlist",
+    "SignalAccuracyStats",
     "RunHistory",
     "CalendarEvent",
     # Session Management

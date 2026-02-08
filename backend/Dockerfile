@@ -33,8 +33,8 @@ COPY --from=build /usr/local/bin /usr/local/bin
 # Copy application source
 COPY . .
 
-# Create data directories
-RUN mkdir -p data/raw data/processed data/context
+# Create data directories (including logs)
+RUN mkdir -p data/raw data/processed data/context data/logs
 
 EXPOSE 8000
 

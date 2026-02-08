@@ -46,7 +46,7 @@ class Ranker:
         self,
         event: dict,
         today: datetime = None,
-        open_investigation_ids: list[str] = None,
+        active_themes: list[str] = None,
         hot_topics: list[str] = None
     ) -> RankingResult:
         """
@@ -55,7 +55,7 @@ class Ranker:
         Args:
             event: Event dict with base_score and metadata
             today: Reference date (defaults to now)
-            open_investigation_ids: List of open investigation IDs
+            active_themes: List of active theme names
             hot_topics: List of hot topic names
             
         Returns:
@@ -82,7 +82,7 @@ class Ranker:
         
         # Calculate factors
         decay = get_decay_factor(age_days)
-        boost = calculate_boost_factor(event, open_investigation_ids, hot_topics)
+        boost = calculate_boost_factor(event, active_themes, hot_topics)
         
         # Calculate final score
         final_score = base_score * decay * boost
@@ -114,7 +114,7 @@ class Ranker:
     def rank_all_events(
         self,
         events: list[dict],
-        open_investigation_ids: list[str] = None,
+        active_themes: list[str] = None,
         hot_topics: list[str] = None
     ) -> dict:
         """
@@ -122,7 +122,7 @@ class Ranker:
         
         Args:
             events: List of event dicts
-            open_investigation_ids: List of open investigation IDs
+            active_themes: List of active theme names
             hot_topics: List of hot topic names
             
         Returns:
@@ -135,7 +135,7 @@ class Ranker:
             result = self.rank_event(
                 event, 
                 today,
-                open_investigation_ids,
+                active_themes,
                 hot_topics
             )
             rankings.append(result.to_dict())

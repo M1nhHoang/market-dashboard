@@ -36,7 +36,7 @@ DECAY_SCHEDULE = {
 # BOOST FACTORS
 # ============================================
 
-BOOST_FOLLOW_UP = 1.20      # +20% for follow-up to investigation
+BOOST_FOLLOW_UP = 1.20      # +20% for theme-related events
 BOOST_HOT_TOPIC = 1.15      # +15% for hot topic
 BOOST_MULTI_INDICATOR = 1.10  # +10% for connecting 2+ indicators
 
@@ -77,32 +77,36 @@ def get_decay_factor(age_days: int) -> float:
 
 def calculate_boost_factor(
     event: dict,
-    open_investigation_ids: list[str] = None,
+    active_themes: list[str] = None,
     hot_topics: list[str] = None
 ) -> float:
     """
     Calculate boost factor for an event.
     
     Boosts are applied for:
-    - Follow-up to open investigation (+20%)
+    - Part of active theme (+20%)
     - Part of hot topic (+15%)
     - Connects 2+ indicators (+10%)
     
     Args:
         event: Event dict with metadata
-        open_investigation_ids: List of open investigation IDs
+        active_themes: List of active theme names
         hot_topics: List of hot topic names
         
     Returns:
         Combined boost factor (multiplicative)
     """
     boost = 1.0
-    open_investigation_ids = open_investigation_ids or []
+    active_themes = active_themes or []
     hot_topics = hot_topics or []
     
-    # Follow-up boost
-    if event.get('is_follow_up') and event.get('follows_up_on') in open_investigation_ids:
-        boost *= BOOST_FOLLOW_UP
+    # Theme boost - if event is part of an active theme
+    event_category = event.get('category', '')
+    event_title = event.get('title', '').lower()
+    for theme_name in active_themes:
+        if theme_name.lower() in event_title or theme_name.lower() in event_category.lower():
+            boost *= BOOST_FOLLOW_UP  # Reuse the 20% boost
+            break
     
     # Hot topic boost
     if event.get('hot_topic') and event.get('hot_topic') in hot_topics:

@@ -13,7 +13,6 @@ from .classifier import Classifier, ClassificationResult, classify_indicator_dat
 from .scorer import Scorer, ScoringResult, generate_context_summary
 from .ranker import (
     Ranker,
-    InvestigationReviewer,
     RankingResult,
     get_decay_factor,
     calculate_boost_factor,
@@ -36,7 +35,6 @@ __all__ = [
     "generate_context_summary",
     # Layer 3: Ranker
     "Ranker",
-    "InvestigationReviewer",
     "RankingResult",
     "get_decay_factor",
     "calculate_boost_factor",

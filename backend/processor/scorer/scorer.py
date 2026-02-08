@@ -2,7 +2,7 @@
 Scorer - Layer 2 News Scoring
 
 Scores market-relevant news and performs causal analysis.
-Requires previous context and open investigations for continuity.
+Generates signals (predictions) and links to themes.
 """
 import json
 from pathlib import Path
@@ -12,7 +12,7 @@ from loguru import logger
 from config import settings
 from llm import get_client, LLMClient
 from prompts import PromptLoader
-from .models import ScoringResult
+from .models import ScoringResult, SignalOutput, ThemeLink
 
 
 class Scorer:
@@ -20,7 +20,7 @@ class Scorer:
     Layer 2: News Scoring
     
     Scores market-relevant news and performs causal analysis.
-    Requires previous context and open investigations for continuity.
+    Generates signals (predictions) and links to themes.
     """
     
     def __init__(
@@ -58,7 +58,8 @@ class Scorer:
         self,
         news_item: dict,
         previous_context_summary: str = "",
-        open_investigations: list[dict] = None,
+        active_signals: list[dict] = None,
+        active_themes: list[dict] = None,
         lookback_days: int = 7
     ) -> ScoringResult:
         """
@@ -67,13 +68,15 @@ class Scorer:
         Args:
             news_item: Dict with classification results (from Layer 1)
             previous_context_summary: Summary of previous analysis context
-            open_investigations: List of open investigation dicts
+            active_signals: List of active signal dicts (pending predictions)
+            active_themes: List of active theme dicts
             lookback_days: Days of context
             
         Returns:
-            ScoringResult with score breakdown and analysis
+            ScoringResult with score breakdown, signal output, and theme link
         """
-        open_investigations = open_investigations or []
+        active_signals = active_signals or []
+        active_themes = active_themes or []
         
         prompt = self.prompt_loader.format(
             "scoring",
@@ -85,7 +88,8 @@ class Scorer:
             date=news_item.get('date', news_item.get('published_at', '')),
             lookback_days=lookback_days,
             previous_context_summary=previous_context_summary or "No previous context available.",
-            open_investigations=json.dumps(open_investigations, ensure_ascii=False, indent=2) if open_investigations else "No open investigations.",
+            active_signals=json.dumps(active_signals, ensure_ascii=False, indent=2) if active_signals else "No active signals.",
+            active_themes=json.dumps(active_themes, ensure_ascii=False, indent=2) if active_themes else "No active themes.",
             causal_templates=json.dumps(self.templates, ensure_ascii=False, indent=2)
         )
         
@@ -107,7 +111,8 @@ class Scorer:
         self,
         news_items: list[dict],
         previous_context_summary: str = "",
-        open_investigations: list[dict] = None,
+        active_signals: list[dict] = None,
+        active_themes: list[dict] = None,
         lookback_days: int = 7
     ) -> list[dict]:
         """
@@ -116,14 +121,16 @@ class Scorer:
         Args:
             news_items: List of classified news items (from Layer 1)
             previous_context_summary: Summary of previous context
-            open_investigations: List of open investigations
+            active_signals: List of active signals
+            active_themes: List of active themes
             lookback_days: Days of context
             
         Returns:
             List of news items with scoring results added
         """
         results = []
-        open_investigations = open_investigations or []
+        active_signals = active_signals or []
+        active_themes = active_themes or []
         
         for i, item in enumerate(news_items):
             logger.info(f"Scoring item {i+1}/{len(news_items)}: {item.get('title', '')[:50]}...")
@@ -131,7 +138,8 @@ class Scorer:
             scoring = self.score(
                 item, 
                 previous_context_summary, 
-                open_investigations,
+                active_signals,
+                active_themes,
                 lookback_days
             )
             
@@ -162,14 +170,34 @@ class Scorer:
             
             data = json.loads(text)
             
+            # Parse signal output
+            signal_data = data.get('signal_output', {})
+            signal_output = SignalOutput(
+                create_signal=signal_data.get('create_signal', False),
+                prediction=signal_data.get('prediction'),
+                target_indicator=signal_data.get('target_indicator'),
+                direction=signal_data.get('direction'),
+                target_range_low=signal_data.get('target_range_low'),
+                target_range_high=signal_data.get('target_range_high'),
+                confidence=signal_data.get('confidence', 'medium'),
+                timeframe_days=signal_data.get('timeframe_days'),
+                reasoning=signal_data.get('reasoning'),
+            )
+            
+            # Parse theme link
+            theme_data = data.get('theme_link', {})
+            theme_link = ThemeLink(
+                existing_theme_id=theme_data.get('existing_theme_id'),
+                create_new_theme=theme_data.get('create_new_theme', False),
+                new_theme=theme_data.get('new_theme'),
+            )
+            
             return ScoringResult(
                 base_score=data.get('base_score', 50),
                 score_factors=data.get('score_factors', {}),
                 causal_analysis=data.get('causal_analysis', {}),
-                is_follow_up=data.get('is_follow_up', False),
-                follows_up_on=data.get('follows_up_on'),
-                investigation_action=data.get('investigation_action', {}),
-                predictions=data.get('predictions', []),
+                signal_output=signal_output,
+                theme_link=theme_link,
                 raw_output=raw_output
             )
         except json.JSONDecodeError as e:
@@ -192,16 +220,10 @@ class Scorer:
                 "matched_template_id": None,
                 "chain": [],
                 "confidence": "uncertain",
-                "needs_investigation": [],
                 "reasoning": f"Scoring error: {error_msg}"
             },
-            is_follow_up=False,
-            follows_up_on=None,
-            investigation_action={
-                "resolves": None,
-                "creates_new": False
-            },
-            predictions=[],
+            signal_output=SignalOutput(create_signal=False),
+            theme_link=ThemeLink(create_new_theme=False),
             raw_output="",
             parse_error=error_msg
         )

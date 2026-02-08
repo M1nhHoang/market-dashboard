@@ -19,8 +19,10 @@ ENV/
 data/raw/*
 data/processed/*
 data/context/*
+data/logs/*
 data/*.db
 !data/.gitkeep
+!data/**/.gitkeep
 
 # IDE
 .vscode/

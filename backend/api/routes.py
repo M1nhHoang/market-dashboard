@@ -5,7 +5,9 @@ Endpoints organized by:
 - Health Check
 - Indicators (current values and history)
 - Events (key events, other news, archive)
-- Investigations
+- Signals (predictions with targets)
+- Themes (narrative groupings)
+- Watchlist (user-defined alerts)
 - Topics (hot topics)
 - Calendar (economic events)
 - System (runs, refresh)
@@ -314,7 +316,7 @@ async def get_event(event_id: str):
     if analysis:
         analysis_dict = dict(analysis)
         # Parse JSON fields in analysis
-        for field in ['chain_steps', 'needs_investigation', 'affected_indicators']:
+        for field in ['chain_steps', 'affected_indicators']:
             if analysis_dict.get(field):
                 try:
                     analysis_dict[field] = json.loads(analysis_dict[field])
@@ -322,15 +324,15 @@ async def get_event(event_id: str):
                     pass
         result["causal_analysis"] = analysis_dict
     
-    # Get related investigations
+    # Get related signals
     cursor = conn.execute(
-        """SELECT * FROM investigations 
-           WHERE source_event_id = ? OR resolved_by_event_id = ?""",
-        (event_id, event_id)
+        """SELECT * FROM signals 
+           WHERE source_event_id = ?""",
+        (event_id,)
     )
-    investigations = [dict(r) for r in cursor.fetchall()]
-    if investigations:
-        result["related_investigations"] = investigations
+    signals = [dict(r) for r in cursor.fetchall()]
+    if signals:
+        result["related_signals"] = signals
     
     conn.close()
     return result
@@ -357,137 +359,248 @@ async def get_causal_analysis(event_id: str):
 
 
 # ============================================================
-# Investigations
+# Signals
 # ============================================================
-@router.get("/investigations")
-async def list_investigations(
-    status: Optional[str] = Query(default=None, description="open, updated, resolved, stale, escalated")
+@router.get("/signals")
+async def list_signals(
+    status: Optional[str] = Query(default=None, description="active, verified_correct, verified_wrong, expired")
 ):
-    """List investigations, defaults to open/updated."""
+    """List signals, defaults to active."""
     conn = get_connection(settings.DATABASE_PATH)
     
     if status == "all":
         cursor = conn.execute(
-            """SELECT i.*, e.title as source_event_title
-               FROM investigations i
-               LEFT JOIN events e ON i.source_event_id = e.id
-               ORDER BY i.created_at DESC"""
+            """SELECT s.*, e.title as source_event_title
+               FROM signals s
+               LEFT JOIN events e ON s.source_event_id = e.id
+               ORDER BY s.created_at DESC"""
         )
     elif status:
         cursor = conn.execute(
-            """SELECT i.*, e.title as source_event_title
-               FROM investigations i
-               LEFT JOIN events e ON i.source_event_id = e.id
-               WHERE i.status = ?
-               ORDER BY i.created_at DESC""",
+            """SELECT s.*, e.title as source_event_title
+               FROM signals s
+               LEFT JOIN events e ON s.source_event_id = e.id
+               WHERE s.status = ?
+               ORDER BY s.created_at DESC""",
             (status,)
         )
     else:
-        # Default: open and updated
+        # Default: active
         cursor = conn.execute(
-            """SELECT i.*, e.title as source_event_title
-               FROM investigations i
-               LEFT JOIN events e ON i.source_event_id = e.id
-               WHERE i.status IN ('open', 'updated')
+            """SELECT s.*, e.title as source_event_title
+               FROM signals s
+               LEFT JOIN events e ON s.source_event_id = e.id
+               WHERE s.status = 'active'
+               AND (s.expires_at IS NULL OR s.expires_at > datetime('now'))
                ORDER BY 
-                   CASE i.priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
-                   i.created_at DESC"""
+                   CASE s.confidence WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                   s.created_at DESC"""
         )
     
     rows = cursor.fetchall()
     conn.close()
     
-    return {"investigations": [dict(row) for row in rows]}
+    return {"signals": [dict(row) for row in rows]}
 
 
-@router.get("/investigations/all")
-async def list_all_investigations(limit: int = Query(default=50, le=200)):
-    """List all investigations including resolved."""
-    conn = get_connection(settings.DATABASE_PATH)
-    cursor = conn.execute(
-        """SELECT i.*, e.title as source_event_title
-           FROM investigations i
-           LEFT JOIN events e ON i.source_event_id = e.id
-           ORDER BY i.updated_at DESC LIMIT ?""",
-        (limit,)
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    
-    return {"investigations": [dict(row) for row in rows]}
-
-
-@router.get("/investigations/{investigation_id}")
-async def get_investigation(investigation_id: str):
-    """Get single investigation with evidence timeline."""
+@router.get("/signals/{signal_id}")
+async def get_signal(signal_id: str):
+    """Get single signal with details."""
     conn = get_connection(settings.DATABASE_PATH)
     
-    # Get investigation
     cursor = conn.execute(
-        """SELECT i.*, e.title as source_event_title
-           FROM investigations i
-           LEFT JOIN events e ON i.source_event_id = e.id
-           WHERE i.id = ?""",
-        (investigation_id,)
+        """SELECT s.*, e.title as source_event_title
+           FROM signals s
+           LEFT JOIN events e ON s.source_event_id = e.id
+           WHERE s.id = ?""",
+        (signal_id,)
     )
-    inv = cursor.fetchone()
+    sig = cursor.fetchone()
     
-    if not inv:
+    if not sig:
         conn.close()
-        raise HTTPException(status_code=404, detail="Investigation not found")
+        raise HTTPException(status_code=404, detail="Signal not found")
     
-    result = dict(inv)
-    
-    # Parse JSON fields
-    for field in ['related_indicators', 'related_templates']:
-        if result.get(field):
-            try:
-                result[field] = json.loads(result[field])
-            except:
-                pass
-    
-    # Get evidence timeline
-    cursor = conn.execute(
-        """SELECT ie.*, e.title as event_title, e.category, e.base_score
-           FROM investigation_evidence ie
-           LEFT JOIN events e ON ie.event_id = e.id
-           WHERE ie.investigation_id = ?
-           ORDER BY ie.added_at DESC""",
-        (investigation_id,)
-    )
-    evidence = [dict(r) for r in cursor.fetchall()]
-    result["evidence_timeline"] = evidence
+    result = dict(sig)
     
     # Get source event details
-    if inv["source_event_id"]:
+    if sig["source_event_id"]:
         cursor = conn.execute(
             "SELECT * FROM events WHERE id = ?",
-            (inv["source_event_id"],)
+            (sig["source_event_id"],)
         )
         source_event = cursor.fetchone()
         if source_event:
             result["source_event"] = dict(source_event)
     
+    # Get theme if linked
+    if sig["theme_id"]:
+        cursor = conn.execute(
+            "SELECT * FROM themes WHERE id = ?",
+            (sig["theme_id"],)
+        )
+        theme = cursor.fetchone()
+        if theme:
+            result["theme"] = dict(theme)
+    
     conn.close()
     return result
 
 
-@router.get("/investigations/{investigation_id}/evidence")
-async def get_investigation_evidence(investigation_id: str):
-    """Get all evidence for an investigation."""
+@router.get("/signals/accuracy")
+async def get_signal_accuracy():
+    """Get signal accuracy statistics."""
     conn = get_connection(settings.DATABASE_PATH)
     cursor = conn.execute(
-        """SELECT ie.*, e.title as event_title, e.summary as event_summary
-           FROM investigation_evidence ie
-           LEFT JOIN events e ON ie.event_id = e.id
-           WHERE ie.investigation_id = ?
-           ORDER BY ie.added_at DESC""",
-        (investigation_id,)
+        """SELECT * FROM signal_accuracy_stats 
+           ORDER BY calculated_at DESC 
+           LIMIT 10"""
     )
     rows = cursor.fetchall()
     conn.close()
     
-    return {"evidence": [dict(row) for row in rows]}
+    return {"accuracy_stats": [dict(row) for row in rows]}
+
+
+# ============================================================
+# Themes
+# ============================================================
+@router.get("/themes")
+async def list_themes(
+    status: Optional[str] = Query(default=None, description="emerging, active, fading, archived")
+):
+    """List themes, defaults to active and emerging."""
+    conn = get_connection(settings.DATABASE_PATH)
+    
+    if status == "all":
+        cursor = conn.execute(
+            """SELECT * FROM themes 
+               ORDER BY strength DESC, event_count DESC"""
+        )
+    elif status:
+        cursor = conn.execute(
+            """SELECT * FROM themes 
+               WHERE status = ?
+               ORDER BY strength DESC""",
+            (status,)
+        )
+    else:
+        # Default: active and emerging
+        cursor = conn.execute(
+            """SELECT * FROM themes 
+               WHERE status IN ('active', 'emerging')
+               ORDER BY strength DESC, event_count DESC"""
+        )
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return {"themes": [dict(row) for row in rows]}
+
+
+@router.get("/themes/{theme_id}")
+async def get_theme(theme_id: str):
+    """Get single theme with related events and signals."""
+    conn = get_connection(settings.DATABASE_PATH)
+    
+    cursor = conn.execute(
+        "SELECT * FROM themes WHERE id = ?",
+        (theme_id,)
+    )
+    theme = cursor.fetchone()
+    
+    if not theme:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Theme not found")
+    
+    result = dict(theme)
+    
+    # Parse JSON fields
+    if result.get('related_event_ids'):
+        try:
+            result['related_event_ids'] = json.loads(result['related_event_ids'])
+        except:
+            pass
+    
+    # Get related signals
+    cursor = conn.execute(
+        """SELECT * FROM signals 
+           WHERE theme_id = ?
+           ORDER BY created_at DESC""",
+        (theme_id,)
+    )
+    signals = [dict(r) for r in cursor.fetchall()]
+    result["signals"] = signals
+    
+    conn.close()
+    return result
+
+
+# ============================================================
+# Watchlist
+# ============================================================
+@router.get("/watchlist")
+async def list_watchlist(
+    status: Optional[str] = Query(default=None, description="active, triggered, dismissed")
+):
+    """List watchlist items, defaults to active."""
+    conn = get_connection(settings.DATABASE_PATH)
+    
+    if status == "all":
+        cursor = conn.execute(
+            """SELECT * FROM watchlist 
+               ORDER BY created_at DESC"""
+        )
+    elif status:
+        cursor = conn.execute(
+            """SELECT * FROM watchlist 
+               WHERE status = ?
+               ORDER BY created_at DESC""",
+            (status,)
+        )
+    else:
+        # Default: active
+        cursor = conn.execute(
+            """SELECT * FROM watchlist 
+               WHERE status = 'active'
+               ORDER BY created_at DESC"""
+        )
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return {"watchlist": [dict(row) for row in rows]}
+
+
+@router.get("/watchlist/{item_id}")
+async def get_watchlist_item(item_id: str):
+    """Get single watchlist item with trigger event."""
+    conn = get_connection(settings.DATABASE_PATH)
+    
+    cursor = conn.execute(
+        "SELECT * FROM watchlist WHERE id = ?",
+        (item_id,)
+    )
+    item = cursor.fetchone()
+    
+    if not item:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Watchlist item not found")
+    
+    result = dict(item)
+    
+    # Get trigger event if exists
+    if item["triggered_by_event_id"]:
+        cursor = conn.execute(
+            "SELECT * FROM events WHERE id = ?",
+            (item["triggered_by_event_id"],)
+        )
+        event = cursor.fetchone()
+        if event:
+            result["trigger_event"] = dict(event)
+    
+    conn.close()
+    return result
 
 
 # ============================================================

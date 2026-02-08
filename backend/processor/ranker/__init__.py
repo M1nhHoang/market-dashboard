@@ -5,7 +5,6 @@ Applies time decay and boost factors, assigns display sections.
 
 Components:
 - Ranker: Main ranking logic
-- InvestigationReviewer: Review and update investigation statuses
 - RankingResult: Data class for ranking results
 - Decay/boost configuration and utilities
 """
@@ -24,13 +23,11 @@ from .config import (
     determine_display_section,
 )
 from .ranker import Ranker
-from .investigation_reviewer import InvestigationReviewer
 
 
 __all__ = [
     # Main classes
     "Ranker",
-    "InvestigationReviewer",
     # Models
     "RankingResult",
     # Config

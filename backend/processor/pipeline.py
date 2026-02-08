@@ -11,8 +11,9 @@ Pipeline Flow (fully autonomous, called by scheduler):
    - Layer 2: Scoring (with context)
    - Layer 3: Ranking (decay, boost, sections)
 6. Save events to database
-7. Review investigations
-8. Save run history
+7. Create signals and link themes
+8. Check watchlist triggers
+9. Save run history
 """
 import hashlib
 import json
@@ -27,7 +28,9 @@ from database.session import get_session, init_engine
 from repositories import (
     EventRepository,
     IndicatorRepository,
-    InvestigationRepository,
+    SignalRepository,
+    ThemeRepository,
+    WatchlistRepository,
     RunHistoryRepository,
 )
 from data_transformers import CrawlerOutput
@@ -35,7 +38,7 @@ from data_transformers.models import MetricRecord, EventRecord, CalendarRecord
 
 from .classifier import Classifier
 from .scorer import Scorer
-from .ranker import Ranker, InvestigationReviewer
+from .ranker import Ranker
 from .context_builder import ContextBuilder
 
 
@@ -59,7 +62,6 @@ class Pipeline:
         self.classifier = Classifier()
         self.scorer = Scorer()
         self.ranker = Ranker()
-        self.investigation_reviewer = InvestigationReviewer()
         
     async def run(self) -> dict:
         """
@@ -108,7 +110,9 @@ class Pipeline:
                 # Initialize repositories
                 events_repo = EventRepository(session)
                 indicators_repo = IndicatorRepository(session)
-                investigations_repo = InvestigationRepository(session)
+                signals_repo = SignalRepository(session)
+                themes_repo = ThemeRepository(session)
+                watchlist_repo = WatchlistRepository(session)
                 run_history_repo = RunHistoryRepository(session)
                 
                 # ============================================
@@ -231,16 +235,31 @@ class Pipeline:
                 # ============================================
                 logger.info("Step 6: Building context...")
                 
-                # Get open investigations
-                open_investigations = await investigations_repo.get_open()
-                open_investigations_list = [
+                # Get active signals
+                active_signals = await signals_repo.get_active()
+                active_signals_list = [
                     {
-                        "id": inv.id,
-                        "question": inv.question,
-                        "priority": inv.priority,
-                        "evidence_count": inv.evidence_count,
+                        "id": sig.id,
+                        "prediction": sig.prediction,
+                        "target_indicator": sig.target_indicator,
+                        "direction": sig.direction,
+                        "confidence": sig.confidence,
+                        "expires_at": sig.expires_at.isoformat() if sig.expires_at else None,
                     }
-                    for inv in open_investigations
+                    for sig in active_signals
+                ]
+                
+                # Get active themes
+                active_themes = await themes_repo.get_active_and_emerging()
+                active_themes_list = [
+                    {
+                        "id": theme.id,
+                        "name": theme.name,
+                        "strength": theme.strength,
+                        "event_count": theme.event_count,
+                        "status": theme.status,
+                    }
+                    for theme in active_themes
                 ]
                 
                 # Get indicator trends
@@ -257,13 +276,15 @@ class Pipeline:
                 
                 # Build context summary (simplified)
                 context_summary = self._build_context_summary(
-                    open_investigations_list,
+                    active_signals_list,
+                    active_themes_list,
                     indicator_trends,
                     self.lookback_days
                 )
                 
                 results["steps"]["context"] = {
-                    "open_investigations": len(open_investigations_list),
+                    "active_signals": len(active_signals_list),
+                    "active_themes": len(active_themes_list),
                     "indicators_tracked": len(all_indicator_ids),
                 }
                 
@@ -287,7 +308,8 @@ class Pipeline:
                         scoring = self.scorer.score(
                             news_dict,
                             previous_context_summary=context_summary,
-                            open_investigations=open_investigations_list,
+                            active_signals=active_signals_list,
+                            active_themes=active_themes_list,
                             lookback_days=self.lookback_days,
                         )
                         
@@ -314,8 +336,8 @@ class Pipeline:
                 logger.info("Step 8: Saving events...")
                 
                 events_saved = 0
-                investigations_created = 0
-                predictions_created = 0
+                signals_created = 0
+                themes_updated = 0
                 
                 for se in scored_events:
                     event = se["event"]
@@ -365,66 +387,64 @@ class Pipeline:
                                 template_id=causal_analysis.get("matched_template_id"),
                                 chain_steps=causal_analysis.get("chain", []),
                                 confidence=causal_analysis.get("confidence"),
-                                needs_investigation=causal_analysis.get("needs_investigation", []),
                                 affected_indicators=classification.linked_indicators or [],
                                 reasoning=causal_analysis.get("reasoning"),
                             )
                         
-                        # Handle investigation actions
-                        if scoring and scoring.investigation_action:
-                            inv_action = scoring.investigation_action
-                            
-                            # Create new investigation
-                            if inv_action.get("creates_new"):
-                                new_inv = inv_action.get("new_investigation", {})
-                                if new_inv.get("question"):
-                                    await investigations_repo.create_investigation(
-                                        question=new_inv.get("question"),
+                        # Handle signal output from scoring
+                        if scoring and scoring.signal_output:
+                            sig_out = scoring.signal_output
+                            if sig_out.get("creates_new"):
+                                new_sig = sig_out.get("new_signal", {})
+                                if new_sig.get("prediction"):
+                                    expires_at = None
+                                    if new_sig.get("timeframe_days"):
+                                        expires_at = datetime.now() + timedelta(days=new_sig["timeframe_days"])
+                                    
+                                    await signals_repo.create_signal(
+                                        prediction=new_sig.get("prediction"),
                                         source_event_id=new_event.id,
-                                        priority=new_inv.get("priority", "medium"),
-                                        context=new_inv.get("what_to_look_for"),
+                                        target_indicator=new_sig.get("target_indicator"),
+                                        target_range_low=new_sig.get("target_range_low"),
+                                        target_range_high=new_sig.get("target_range_high"),
+                                        direction=new_sig.get("direction"),
+                                        confidence=new_sig.get("confidence", "medium"),
+                                        timeframe_days=new_sig.get("timeframe_days"),
+                                        expires_at=expires_at,
+                                        reasoning=new_sig.get("reasoning"),
                                         related_indicators=classification.linked_indicators or [],
                                     )
-                                    investigations_created += 1
-                            
-                            # Resolve existing investigation
-                            if inv_action.get("resolves"):
-                                await investigations_repo.resolve(
-                                    investigation_id=inv_action["resolves"],
-                                    resolution=inv_action.get("resolution", ""),
-                                    confidence="medium",
-                                    resolved_by_event_id=new_event.id,
-                                )
+                                    signals_created += 1
                         
-                        # Save predictions
-                        if scoring and scoring.predictions:
-                            for pred in scoring.predictions:
-                                if pred.get("prediction"):
-                                    check_date = None
-                                    if pred.get("check_by_date"):
-                                        try:
-                                            check_date = datetime.fromisoformat(pred["check_by_date"]).date()
-                                        except:
-                                            pass
-                                    
-                                    await investigations_repo.create_prediction(
-                                        prediction=pred.get("prediction"),
-                                        source_event_id=new_event.id,
-                                        confidence=pred.get("confidence", "medium"),
-                                        check_by_date=check_date,
-                                        verification_indicator=pred.get("verification_indicator"),
+                        # Handle theme link from scoring
+                        if scoring and scoring.theme_link:
+                            theme_link = scoring.theme_link
+                            theme_name = theme_link.get("theme_name")
+                            if theme_name:
+                                # Try to find existing theme
+                                existing_theme = await themes_repo.get_by_name(theme_name)
+                                if existing_theme:
+                                    # Add event to existing theme
+                                    await themes_repo.add_event(existing_theme.id, new_event.id)
+                                    themes_updated += 1
+                                elif theme_link.get("creates_new"):
+                                    # Create new theme
+                                    await themes_repo.create_theme(
+                                        name=theme_name,
+                                        event_id=new_event.id,
+                                        initial_strength=theme_link.get("strength", 50),
                                     )
-                                    predictions_created += 1
+                                    themes_updated += 1
                         
                     except Exception as e:
                         logger.error(f"Failed to save event {event.title[:50]}: {e}")
                 
                 results["steps"]["save"] = {
                     "events_saved": events_saved,
-                    "investigations_created": investigations_created,
-                    "predictions_created": predictions_created,
+                    "signals_created": signals_created,
+                    "themes_updated": themes_updated,
                 }
-                logger.info(f"Saved {events_saved} events, {investigations_created} investigations, {predictions_created} predictions")
+                logger.info(f"Saved {events_saved} events, {signals_created} signals, {themes_updated} themes")
                 
                 # ============================================
                 # Step 9: Layer 3 - Rank all active events
@@ -439,13 +459,13 @@ class Pipeline:
                 hot_topics = self.ranker.detect_hot_topics(all_active_dicts)
                 hot_topic_names = [t["topic"] for t in hot_topics]
                 
-                # Get open investigation IDs
-                open_inv_ids = [inv.id for inv in open_investigations]
+                # Get active theme names for boost
+                active_theme_names = [t.name for t in active_themes]
                 
                 # Rank events
                 ranking_result = self.ranker.rank_all_events(
                     all_active_dicts,
-                    open_investigation_ids=open_inv_ids,
+                    active_themes=active_theme_names,
                     hot_topics=hot_topic_names,
                 )
                 
@@ -481,43 +501,51 @@ class Pipeline:
                 logger.info(f"Ranked {len(ranking_result.get('rankings', []))} events: {key_events_count} key, {other_news_count} other")
                 
                 # ============================================
-                # Step 10: Review investigations
+                # Step 10: Check watchlist triggers
                 # ============================================
-                logger.info("Step 10: Reviewing investigations...")
+                logger.info("Step 10: Checking watchlist triggers...")
                 
-                updates_applied = 0
-                if open_investigations and scored_events:
-                    try:
-                        review_result = self.investigation_reviewer.review(
-                            [{"id": inv.id, "question": inv.question} for inv in open_investigations],
-                            [self._event_to_dict(se["event"]) for se in scored_events],
+                watchlist_triggered = 0
+                active_watchlist = await watchlist_repo.get_active()
+                
+                for item in active_watchlist:
+                    triggered = False
+                    trigger_event_id = None
+                    
+                    if item.trigger_type == "keyword":
+                        # Check if keyword appears in today's events
+                        keyword = item.trigger_condition
+                        for se in scored_events:
+                            event = se["event"]
+                            if keyword.lower() in (event.title or "").lower() or keyword.lower() in (event.content or "").lower():
+                                triggered = True
+                                trigger_event_id = event.id if hasattr(event, 'id') else None
+                                break
+                    
+                    elif item.trigger_type == "indicator":
+                        # Check indicator threshold
+                        triggered = await watchlist_repo.check_indicator_trigger(
+                            item.id, 
+                            indicators_repo
                         )
-                        
-                        for update in review_result.get("investigation_updates", []):
-                            inv_id = update.get("investigation_id")
-                            new_status = update.get("new_status")
-                            
-                            if new_status and new_status != "open":
-                                await investigations_repo.update_status(
-                                    investigation_id=inv_id,
-                                    status=new_status,
-                                )
-                                updates_applied += 1
-                            
-                            # Add evidence
-                            for evidence in update.get("evidence_today", []):
-                                await investigations_repo.add_evidence(
-                                    investigation_id=inv_id,
-                                    event_id=evidence.get("event_id", ""),
-                                    evidence_type=evidence.get("evidence_type", "neutral"),
-                                    summary=evidence.get("summary", ""),
-                                )
-                    except Exception as e:
-                        logger.error(f"Investigation review failed: {e}")
+                    
+                    elif item.trigger_type == "date":
+                        # Check if trigger date reached
+                        if item.trigger_value:
+                            try:
+                                trigger_date = datetime.fromisoformat(item.trigger_value).date()
+                                if date.today() >= trigger_date:
+                                    triggered = True
+                            except:
+                                pass
+                    
+                    if triggered:
+                        await watchlist_repo.trigger(item.id, trigger_event_id)
+                        watchlist_triggered += 1
                 
-                results["steps"]["review"] = {
-                    "investigations_reviewed": len(open_investigations),
-                    "updates_applied": updates_applied,
+                results["steps"]["watchlist"] = {
+                    "checked": len(active_watchlist),
+                    "triggered": watchlist_triggered,
                 }
                 
                 # ============================================
@@ -532,9 +560,9 @@ class Pipeline:
                     events_extracted=events_saved,
                     events_key=key_events_count,
                     events_other=other_news_count,
-                    investigations_opened=investigations_created,
-                    investigations_updated=updates_applied,
-                    investigations_resolved=0,  # TODO: track
+                    signals_created=signals_created,
+                    themes_updated=themes_updated,
+                    watchlist_triggered=watchlist_triggered,
                     summary=summary,
                     status="success",
                 )
@@ -701,21 +729,29 @@ class Pipeline:
     
     def _build_context_summary(
         self,
-        open_investigations: list,
+        active_signals: list,
+        active_themes: list,
         indicator_trends: dict,
         lookback_days: int
     ) -> str:
         """Build a simple context summary for scoring."""
         lines = [f"Context from last {lookback_days} days:"]
         
-        if open_investigations:
-            lines.append(f"\nOpen Investigations ({len(open_investigations)}):")
-            for inv in open_investigations[:5]:
-                lines.append(f"  - [{inv['priority']}] {inv['question']}")
+        if active_signals:
+            lines.append(f"\nActive Signals ({len(active_signals)}):")
+            for sig in active_signals[:10]:  # Limit to 10
+                direction = sig.get('direction', '?')
+                indicator = sig.get('target_indicator', 'unknown')
+                lines.append(f"  - [{sig.get('confidence', 'medium')}] {sig['prediction']} (target: {indicator} {direction})")
+        
+        if active_themes:
+            lines.append(f"\nActive Themes ({len(active_themes)}):")
+            for theme in active_themes[:5]:  # Limit to 5
+                lines.append(f"  - {theme['name']} (strength: {theme.get('strength', 0)}, events: {theme.get('event_count', 0)})")
         
         if indicator_trends:
             lines.append(f"\nIndicator Trends:")
-            for ind_id, trend in list(indicator_trends.items())[:10]:
+            for ind_id, trend in list(indicator_trends.items()):
                 lines.append(f"  - {ind_id}: {trend['trend']} ({trend['change_pct']:.2f}%)")
         
         return "\n".join(lines)
@@ -730,8 +766,9 @@ class Pipeline:
             f"- {steps.get('metrics', {}).get('indicators_updated', 0)} indicators updated",
             f"- {steps.get('classify', {}).get('relevant', 0)}/{steps.get('classify', {}).get('total', 0)} news relevant",
             f"- {steps.get('save', {}).get('events_saved', 0)} events saved",
-            f"- {steps.get('save', {}).get('investigations_created', 0)} investigations created",
-            f"- {steps.get('rank', {}).get('key_events', 0)} key events, {steps.get('rank', {}).get('other_news', 0)} other news"
+            f"- {steps.get('save', {}).get('signals_created', 0)} signals created, {steps.get('save', {}).get('themes_updated', 0)} themes updated",
+            f"- {steps.get('rank', {}).get('key_events', 0)} key events, {steps.get('rank', {}).get('other_news', 0)} other news",
+            f"- {steps.get('watchlist', {}).get('triggered', 0)} watchlist items triggered"
         ]
         
         return "\n".join(lines)
@@ -744,7 +781,7 @@ class Pipeline:
         
         async with get_session() as session:
             events_repo = EventRepository(session)
-            investigations_repo = InvestigationRepository(session)
+            themes_repo = ThemeRepository(session)
             
             all_active = await events_repo.get_active_events(max_age_days=30)
             all_active_dicts = [self._db_event_to_dict(e) for e in all_active]
@@ -752,12 +789,12 @@ class Pipeline:
             hot_topics = self.ranker.detect_hot_topics(all_active_dicts)
             hot_topic_names = [t["topic"] for t in hot_topics]
             
-            open_investigations = await investigations_repo.get_open()
-            open_inv_ids = [inv.id for inv in open_investigations]
+            active_themes = await themes_repo.get_active_and_emerging()
+            active_theme_names = [t.name for t in active_themes]
             
             ranking_result = self.ranker.rank_all_events(
                 all_active_dicts,
-                open_investigation_ids=open_inv_ids,
+                active_themes=active_theme_names,
                 hot_topics=hot_topic_names,
             )
             

@@ -2,7 +2,6 @@
 SQLAlchemy-based Repositories
 
 This package provides async repository pattern using SQLAlchemy ORM.
-These repositories replace the legacy raw SQL-based DAOs.
 
 Usage:
     from repositories import IndicatorRepository
@@ -17,7 +16,7 @@ Usage:
 from .base import BaseRepository
 from .indicators import IndicatorRepository
 from .events import EventRepository
-from .investigations import InvestigationRepository
+from .insights import SignalRepository, ThemeRepository, WatchlistRepository, SignalAccuracyStatsRepository
 from .run_history import RunHistoryRepository
 from .llm_history import LLMHistoryRepository
 
@@ -25,7 +24,12 @@ __all__ = [
     "BaseRepository",
     "IndicatorRepository",
     "EventRepository",
-    "InvestigationRepository",
+    # Insights (Signals, Themes, Watchlist)
+    "SignalRepository",
+    "ThemeRepository",
+    "WatchlistRepository",
+    "SignalAccuracyStatsRepository",
+    # System
     "RunHistoryRepository",
     "LLMHistoryRepository",
 ]

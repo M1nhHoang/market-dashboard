@@ -33,9 +33,9 @@ class RunHistory(Base):
     events_extracted: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     events_key: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     events_other: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    investigations_opened: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    investigations_updated: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    investigations_resolved: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    signals_created: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    themes_updated: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    watchlist_triggered: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     
     # Raw data tracking (Option A)
     raw_data_path: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Path to raw JSON file

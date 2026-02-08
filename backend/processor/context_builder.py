@@ -16,9 +16,9 @@ class ContextBuilder:
     
     Context includes:
     - Last run summary
-    - Open investigations
+    - Active signals (pending predictions)
+    - Active themes
     - Recurring topics
-    - Recent predictions
     - Key events from lookback period
     """
     
@@ -45,17 +45,17 @@ class ContextBuilder:
         
         context = {
             "last_run_summary": self._get_last_run_summary(),
-            "open_investigations": self._get_open_investigations(),
+            "active_signals": self._get_active_signals(),
+            "active_themes": self._get_active_themes(),
             "recurring_topics": self._get_recurring_topics(lookback_days),
-            "recent_predictions": self._get_recent_predictions(lookback_days),
             "key_events_last_period": self._get_key_events(cutoff_str),
             "indicator_trends": self._get_indicator_trends(lookback_days),
             "context_generated_at": datetime.now().isoformat(),
             "lookback_days": lookback_days
         }
         
-        logger.info(f"Built context with {len(context['open_investigations'])} open investigations, "
-                   f"{len(context['recurring_topics'])} recurring topics, "
+        logger.info(f"Built context with {len(context['active_signals'])} active signals, "
+                   f"{len(context['active_themes'])} active themes, "
                    f"{len(context['indicator_trends'])} indicators")
         
         return context
@@ -85,35 +85,69 @@ class ContextBuilder:
             logger.warning(f"Failed to get last run summary: {e}")
             return None
     
-    def _get_open_investigations(self) -> list[dict]:
-        """Get all open investigation items."""
+    def _get_active_signals(self) -> list[dict]:
+        """Get all active signals (pending predictions)."""
         try:
             conn = self._get_connection()
             cursor = conn.execute("""
                 SELECT 
-                    i.id,
-                    i.item,
-                    i.source_event_id,
-                    i.created_at,
-                    i.run_date,
+                    s.id,
+                    s.prediction,
+                    s.direction,
+                    s.target_indicator,
+                    s.target_range_low,
+                    s.target_range_high,
+                    s.confidence,
+                    s.expires_at,
+                    s.created_at,
                     e.title as source_event_title
-                FROM investigations i
-                LEFT JOIN events e ON i.source_event_id = e.id
-                WHERE i.status IN ('open', 'updated')
+                FROM signals s
+                LEFT JOIN events e ON s.source_event_id = e.id
+                WHERE s.status = 'active'
+                AND (s.expires_at IS NULL OR s.expires_at > datetime('now'))
                 ORDER BY 
-                    CASE i.priority 
+                    CASE s.confidence 
                         WHEN 'high' THEN 1 
                         WHEN 'medium' THEN 2 
                         ELSE 3 
                     END,
-                    i.created_at DESC
+                    s.created_at DESC
+                LIMIT 20
             """)
             rows = cursor.fetchall()
             conn.close()
             
             return [dict(row) for row in rows]
         except Exception as e:
-            logger.warning(f"Failed to get open investigations: {e}")
+            logger.warning(f"Failed to get active signals: {e}")
+            return []
+    
+    def _get_active_themes(self) -> list[dict]:
+        """Get all active and emerging themes."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.execute("""
+                SELECT 
+                    t.id,
+                    t.name,
+                    t.name_vi,
+                    t.description,
+                    t.strength,
+                    t.status,
+                    t.event_count,
+                    t.first_seen,
+                    t.last_seen
+                FROM themes t
+                WHERE t.status IN ('active', 'emerging')
+                ORDER BY t.strength DESC, t.event_count DESC
+                LIMIT 10
+            """)
+            rows = cursor.fetchall()
+            conn.close()
+            
+            return [dict(row) for row in rows]
+        except Exception as e:
+            logger.warning(f"Failed to get active themes: {e}")
             return []
     
     def _get_recurring_topics(self, lookback_days: int) -> list[dict]:
@@ -143,27 +177,6 @@ class ContextBuilder:
         except Exception as e:
             logger.warning(f"Failed to get recurring topics: {e}")
             return []
-    
-    def _get_recent_predictions(self, lookback_days: int) -> list[dict]:
-        """Get predictions that need verification."""
-        try:
-            conn = self._get_connection()
-            cursor = conn.execute("""
-                SELECT 
-                    id, prediction, confidence, check_by_date,
-                    verification_indicator, status
-                FROM predictions
-                WHERE status = 'pending' 
-                AND check_by_date <= date('now', '+7 days')
-                ORDER BY check_by_date ASC
-                LIMIT 10
-            """)
-            rows = cursor.fetchall()
-            conn.close()
-            
-            return [dict(row) for row in rows]
-        except Exception as e:
-            logger.warning(f"Failed to get recent predictions: {e}")
             return []
     
     def _get_key_events(self, cutoff_date: str) -> list[dict]:
@@ -228,19 +241,28 @@ class ContextBuilder:
             run = context["last_run_summary"]
             sections.append(f"### Tóm tắt lần chạy gần nhất ({run.get('run_date', 'N/A')}):\n{run.get('summary', 'Không có tóm tắt')}")
         
-        # Open investigations
-        investigations = context.get("open_investigations", [])
-        if investigations:
-            inv_lines = []
-            for inv in investigations:
-                priority_icon = "⚡" if inv.get('priority') == 'high' else "📋"
-                title = inv.get('source_event_title') or 'N/A'
-                question = inv.get('question') or inv.get('item', 'N/A')
-                inv_lines.append(f"- {priority_icon} [{inv['id']}] {question}")
-                inv_lines.append(f"  (nguồn: {title[:50]}...)" if len(title) > 50 else f"  (nguồn: {title})")
-            sections.append(f"### Các điểm cần điều tra (OPEN - {len(investigations)} items):\n" + "\n".join(inv_lines))
+        # Active signals
+        signals = context.get("active_signals", [])
+        if signals:
+            sig_lines = []
+            for sig in signals:
+                confidence_icon = "⚡" if sig.get('confidence') == 'high' else "📊"
+                direction = sig.get('direction', '?')
+                indicator = sig.get('target_indicator', 'unknown')
+                sig_lines.append(f"- {confidence_icon} [{sig['id']}] {sig['prediction']}")
+                sig_lines.append(f"  (target: {indicator} {direction}, expires: {sig.get('expires_at', 'N/A')})")
+            sections.append(f"### Signals đang active ({len(signals)} items):\n" + "\n".join(sig_lines))
         
-        # Recurring topics
+        # Active themes
+        themes = context.get("active_themes", [])
+        if themes:
+            theme_lines = []
+            for theme in themes:
+                status_icon = "🔥" if theme.get('status') == 'active' else "📈"
+                theme_lines.append(f"- {status_icon} {theme['name']} (strength: {theme.get('strength', 0)}, events: {theme.get('event_count', 0)})")
+            sections.append(f"### Themes đang theo dõi ({len(themes)} items):\n" + "\n".join(theme_lines))
+        
+        # Recurring topics  
         topics = context.get("recurring_topics", [])
         if topics:
             topic_text = "\n".join([
@@ -248,15 +270,6 @@ class ContextBuilder:
                 for t in topics
             ])
             sections.append(f"### Chủ đề xuất hiện nhiều lần (Hot Topics):\n{topic_text}")
-        
-        # Pending predictions
-        predictions = context.get("recent_predictions", [])
-        if predictions:
-            pred_text = "\n".join([
-                f"- [{p['check_by_date']}] {p['prediction']} (confidence: {p['confidence']})"
-                for p in predictions
-            ])
-            sections.append(f"### Dự đoán cần kiểm tra:\n{pred_text}")
         
         # Key events
         events = context.get("key_events_last_period", [])

@@ -16,11 +16,10 @@ class ParsedAnalysis:
     analysis_date: str
     run_id: str
     events: list[dict]
-    investigation_updates: list[dict]
-    new_investigations: list[dict]
+    signal_outputs: list[dict]
+    theme_updates: list[dict]
     recurring_topic_flags: list[dict]
     indicator_alerts: list[dict]
-    predictions: list[dict]
     daily_summary: str
     raw_output: str
     parse_errors: list[str]
@@ -42,11 +41,10 @@ class OutputParser:
     }
     
     OPTIONAL_FIELDS = {
-        "investigation_updates": list,
-        "new_investigations": list,
+        "signal_outputs": list,
+        "theme_updates": list,
         "recurring_topic_flags": list,
         "indicator_alerts": list,
-        "predictions": list
     }
     
     EVENT_REQUIRED_FIELDS = {
@@ -115,11 +113,10 @@ class OutputParser:
             analysis_date=data.get("analysis_date", datetime.now().strftime("%Y-%m-%d")),
             run_id=data.get("run_id", f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"),
             events=validated_events,
-            investigation_updates=data.get("investigation_updates", []),
-            new_investigations=data.get("new_investigations", []),
+            signal_outputs=data.get("signal_outputs", []),
+            theme_updates=data.get("theme_updates", []),
             recurring_topic_flags=data.get("recurring_topic_flags", []),
             indicator_alerts=data.get("indicator_alerts", []),
-            predictions=data.get("predictions", []),
             daily_summary=data.get("daily_summary", ""),
             raw_output=raw_output,
             parse_errors=errors
@@ -185,11 +182,10 @@ class OutputParser:
             analysis_date=datetime.now().strftime("%Y-%m-%d"),
             run_id=f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             events=[],
-            investigation_updates=[],
-            new_investigations=[],
+            signal_outputs=[],
+            theme_updates=[],
             recurring_topic_flags=[],
             indicator_alerts=[],
-            predictions=[],
             daily_summary="",
             raw_output=raw_output,
             parse_errors=errors

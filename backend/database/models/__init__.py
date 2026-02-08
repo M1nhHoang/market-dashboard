@@ -5,14 +5,14 @@ This module defines all database models using SQLAlchemy ORM.
 Models are organized by domain:
 - Indicators: Market indicators and their history
 - Events: News events and causal analysis
-- Investigations: Open questions and evidence
+- Insights: Signals, Themes, and Watchlist for predictions and tracking
 - System: Run history, calendar, LLM history, etc.
 """
 
 from .base import Base, TimestampMixin
 from .indicators import Indicator, IndicatorHistory
 from .events import Event, CausalAnalysis, TopicFrequency, ScoreHistory
-from .investigations import Investigation, InvestigationEvidence, Prediction
+from .insights import Signal, Theme, Watchlist, SignalAccuracyStats
 from .system import RunHistory, CalendarEvent
 from .llm_history import LLMCallHistory
 
@@ -28,10 +28,11 @@ __all__ = [
     "CausalAnalysis",
     "TopicFrequency",
     "ScoreHistory",
-    # Investigations
-    "Investigation",
-    "InvestigationEvidence",
-    "Prediction",
+    # Insights (Signals, Themes, Watchlist)
+    "Signal",
+    "Theme",
+    "Watchlist",
+    "SignalAccuracyStats",
     # System
     "RunHistory",
     "CalendarEvent",

@@ -20,7 +20,7 @@ Prompt Files:
 - classification.md: Layer 1 - News classification
 - scoring.md: Layer 2 - News scoring and analysis
 - context_summary.md: Context summarization for Layer 2
-- investigation_review.md: Investigation status updates
+- main_analysis.md: Main analysis prompt
 """
 
 from ._loader import PromptLoader, get_prompt, list_prompts
