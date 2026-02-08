@@ -31,33 +31,33 @@ services:
       - mi-network
 
   # --- Scheduler / Worker (crawlers + LLM pipeline) ---
-  # scheduler:
-  #   build:
-  #     context: ./backend
-  #     dockerfile: Dockerfile
-  #   container_name: mi-scheduler
-  #   restart: unless-stopped
-  #   command: ["python", "scheduler.py"]
-  #   env_file:
-  #     - ./backend/.env
-  #   environment:
-  #     - DATABASE_PATH=/app/data/market.db
-  #   volumes:
-  #     # Share the same data directory as backend (bind mount)
-  #     - ./backend/data:/app/data
-  #     - ./backend/templates:/app/templates:ro
-  #   depends_on:
-  #     backend:
-  #       condition: service_healthy
-  #   networks:
-  #     - mi-network
-  #   # Override healthcheck - scheduler has no HTTP server
-  #   healthcheck:
-  #     test: ["CMD", "pgrep", "-f", "scheduler.py"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-  #     start_period: 10s
+  scheduler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mi-scheduler
+    restart: unless-stopped
+    command: ["python", "scheduler.py"]
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_PATH=/app/data/market.db
+    volumes:
+      # Share the same data directory as backend (bind mount)
+      - ./backend/data:/app/data
+      - ./backend/templates:/app/templates:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - mi-network
+    # Override healthcheck - scheduler has no HTTP server
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "scheduler.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   # --- React Frontend (Nginx) ---
   frontend:

@@ -67,19 +67,57 @@ export const getTodayEvents = () => fetchAPI('/events/today');
 export const getEvent = (id) => fetchAPI(`/events/${id}`);
 
 // ============================================================
-// Investigations
+// Signals
 // ============================================================
-export const getInvestigations = (status = null) => 
-  fetchAPI(`/investigations${status ? `?status=${status}` : ''}`);
+export const getSignals = (params = {}) => {
+  const query = new URLSearchParams(params).toString();
+  return fetchAPI(`/signals${query ? `?${query}` : ''}`);
+};
 
-export const getAllInvestigations = (limit = 50) => 
-  fetchAPI(`/investigations/all?limit=${limit}`);
+export const getSignal = (id) => fetchAPI(`/signals/${id}`);
 
-export const getInvestigation = (id) => 
-  fetchAPI(`/investigations/${id}`);
+export const getSignalAccuracy = () => fetchAPI('/signals/accuracy');
 
-export const getInvestigationEvidence = (id) => 
-  fetchAPI(`/investigations/${id}/evidence`);
+// ============================================================
+// Themes
+// ============================================================
+export const getThemes = (params = {}) => {
+  const query = new URLSearchParams(params).toString();
+  return fetchAPI(`/themes${query ? `?${query}` : ''}`);
+};
+
+export const getTheme = (id) => fetchAPI(`/themes/${id}`);
+
+export const archiveTheme = (id) => 
+  fetchAPI(`/themes/${id}/archive`, { method: 'POST' });
+
+// ============================================================
+// Watchlist
+// ============================================================
+export const getWatchlist = (params = {}) => {
+  const query = new URLSearchParams(params).toString();
+  return fetchAPI(`/watchlist${query ? `?${query}` : ''}`);
+};
+
+export const getWatchlistItem = (id) => fetchAPI(`/watchlist/${id}`);
+
+export const createWatchlistItem = (data) => 
+  fetchAPI('/watchlist', { method: 'POST', body: JSON.stringify(data) });
+
+export const updateWatchlistItem = (id, data) => 
+  fetchAPI(`/watchlist/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+
+export const deleteWatchlistItem = (id) => 
+  fetchAPI(`/watchlist/${id}`, { method: 'DELETE' });
+
+export const dismissWatchlistItem = (id) => 
+  fetchAPI(`/watchlist/${id}/dismiss`, { method: 'POST' });
+
+export const snoozeWatchlistItem = (id, days) => 
+  fetchAPI(`/watchlist/${id}/snooze`, { method: 'POST', body: JSON.stringify({ days }) });
+
+export const restoreWatchlistItem = (id) => 
+  fetchAPI(`/watchlist/${id}/restore`, { method: 'POST' });
 
 // ============================================================
 // Topics
@@ -117,10 +155,20 @@ export default {
   getOtherNews,
   getTodayEvents,
   getEvent,
-  getInvestigations,
-  getAllInvestigations,
-  getInvestigation,
-  getInvestigationEvidence,
+  getSignals,
+  getSignal,
+  getSignalAccuracy,
+  getThemes,
+  getTheme,
+  archiveTheme,
+  getWatchlist,
+  getWatchlistItem,
+  createWatchlistItem,
+  updateWatchlistItem,
+  deleteWatchlistItem,
+  dismissWatchlistItem,
+  snoozeWatchlistItem,
+  restoreWatchlistItem,
   getHotTopics,
   getTopicEvents,
   getCalendar,

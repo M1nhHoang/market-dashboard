@@ -1,23 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Activity, TrendingUp, AlertCircle, Calendar, Settings } from 'lucide-react';
-import { getHealth, getLatestRun, getIndicators, getKeyEvents, getOtherNews, getInvestigations, getCalendar } from './services/api';
+import { RefreshCw, Activity, TrendingUp, AlertCircle, Calendar, Settings, Radio, Flame, Eye } from 'lucide-react';
+import { getHealth, getLatestRun, getIndicators, getKeyEvents, getOtherNews, getSignals, getSignalAccuracy, getThemes, getWatchlist, getCalendar, createWatchlistItem, dismissWatchlistItem, snoozeWatchlistItem, restoreWatchlistItem, deleteWatchlistItem } from './services/api';
 import { useFetch, useModal } from './hooks';
 import { formatDateTime, formatRelativeTime } from './utils/format';
 import IndicatorPanel from './components/IndicatorPanel';
 import EventList from './components/EventList';
 import EventDetail from './components/EventDetail';
-import InvestigationPanel from './components/InvestigationPanel';
-import InvestigationDetail from './components/InvestigationDetail';
+import SignalPanel from './components/SignalPanel';
+import SignalDetail from './components/SignalDetail';
+import ThemePanel from './components/ThemePanel';
+import ThemeDetail from './components/ThemeDetail';
+import WatchlistPanel from './components/WatchlistPanel';
+import WatchlistAddModal from './components/WatchlistAddModal';
 import CalendarPanel from './components/CalendarPanel';
 import LoadingSpinner from './components/LoadingSpinner';
 
 function App() {
   const [activeTab, setActiveTab] = useState('vietnam');
   const [refreshing, setRefreshing] = useState(false);
+  const [watchlistAddModalOpen, setWatchlistAddModalOpen] = useState(false);
   
   // Modals
   const eventModal = useModal();
-  const investigationModal = useModal();
+  const signalModal = useModal();
+  const themeModal = useModal();
 
   // Data fetching
   const { data: healthData } = useFetch(getHealth, [], true);
@@ -25,7 +31,10 @@ function App() {
   const { data: indicatorsData, loading: indicatorsLoading, execute: refetchIndicators } = useFetch(getIndicators, [], true);
   const { data: keyEventsData, loading: eventsLoading, execute: refetchEvents } = useFetch(getKeyEvents, [], true);
   const { data: otherNewsData, execute: refetchOtherNews } = useFetch(getOtherNews, [], true);
-  const { data: investigationsData, loading: invLoading, execute: refetchInvestigations } = useFetch(getInvestigations, [], true);
+  const { data: signalsData, loading: signalsLoading, execute: refetchSignals } = useFetch(getSignals, [], true);
+  const { data: accuracyData, execute: refetchAccuracy } = useFetch(getSignalAccuracy, [], true);
+  const { data: themesData, loading: themesLoading, execute: refetchThemes } = useFetch(getThemes, [], true);
+  const { data: watchlistData, loading: watchlistLoading, execute: refetchWatchlist } = useFetch(getWatchlist, [], true);
   const { data: calendarData, execute: refetchCalendar } = useFetch(getCalendar, [], true);
 
   // Manual refresh
@@ -37,7 +46,10 @@ function App() {
         refetchIndicators(),
         refetchEvents(),
         refetchOtherNews(),
-        refetchInvestigations(),
+        refetchSignals(),
+        refetchAccuracy(),
+        refetchThemes(),
+        refetchWatchlist(),
         refetchCalendar(),
       ]);
     } catch (err) {
@@ -66,6 +78,52 @@ function App() {
   };
 
   const filteredIndicators = getFilteredIndicators();
+
+  // Watchlist handlers
+  const handleAddWatchlistItem = async (data) => {
+    try {
+      await createWatchlistItem(data);
+      refetchWatchlist();
+    } catch (err) {
+      console.error('Failed to add watchlist item:', err);
+    }
+  };
+
+  const handleDismissWatchlistItem = async (id) => {
+    try {
+      await dismissWatchlistItem(id);
+      refetchWatchlist();
+    } catch (err) {
+      console.error('Failed to dismiss watchlist item:', err);
+    }
+  };
+
+  const handleSnoozeWatchlistItem = async (id, days) => {
+    try {
+      await snoozeWatchlistItem(id, days);
+      refetchWatchlist();
+    } catch (err) {
+      console.error('Failed to snooze watchlist item:', err);
+    }
+  };
+
+  const handleRestoreWatchlistItem = async (id) => {
+    try {
+      await restoreWatchlistItem(id);
+      refetchWatchlist();
+    } catch (err) {
+      console.error('Failed to restore watchlist item:', err);
+    }
+  };
+
+  const handleDeleteWatchlistItem = async (id) => {
+    try {
+      await deleteWatchlistItem(id);
+      refetchWatchlist();
+    } catch (err) {
+      console.error('Failed to delete watchlist item:', err);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -139,17 +197,47 @@ function App() {
               📋 All News
             </button>
             <button
-              onClick={() => setActiveTab('investigations')}
+              onClick={() => setActiveTab('signals')}
               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'investigations'
+                activeTab === 'signals'
                   ? 'text-purple-600 border-purple-600'
                   : 'text-gray-500 border-transparent hover:text-gray-700'
               }`}
             >
-              🔍 Investigations
-              {investigationsData?.investigations?.length > 0 && (
+              📡 Signals
+              {signalsData?.signals?.filter(s => s.status === 'pending').length > 0 && (
                 <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-purple-100 text-purple-700 rounded-full">
-                  {investigationsData.investigations.length}
+                  {signalsData.signals.filter(s => s.status === 'pending').length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('themes')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'themes'
+                  ? 'text-orange-600 border-orange-600'
+                  : 'text-gray-500 border-transparent hover:text-gray-700'
+              }`}
+            >
+              🔥 Themes
+              {themesData?.themes?.filter(t => t.status === 'active').length > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-orange-100 text-orange-700 rounded-full">
+                  {themesData.themes.filter(t => t.status === 'active').length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('watchlist')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'watchlist'
+                  ? 'text-teal-600 border-teal-600'
+                  : 'text-gray-500 border-transparent hover:text-gray-700'
+              }`}
+            >
+              👁️ Watchlist
+              {watchlistData?.items?.filter(i => i.status === 'triggered').length > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-red-100 text-red-700 rounded-full">
+                  {watchlistData.items.filter(i => i.status === 'triggered').length}
                 </span>
               )}
             </button>
@@ -159,22 +247,33 @@ function App() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 py-6">
-        {activeTab === 'investigations' ? (
-          // Investigations View
-          <div className="space-y-6">
-            <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-              <AlertCircle className="w-5 h-5 text-purple-600" />
-              Open Investigations
-            </h2>
-            {invLoading ? (
-              <LoadingSpinner />
-            ) : (
-              <InvestigationPanel
-                investigations={investigationsData?.investigations || []}
-                onSelect={(inv) => investigationModal.open(inv)}
-              />
-            )}
-          </div>
+        {activeTab === 'signals' ? (
+          // Signals View
+          <SignalPanel
+            signals={signalsData?.signals || []}
+            accuracyStats={accuracyData}
+            onSelectSignal={(signal) => signalModal.open(signal)}
+            loading={signalsLoading}
+          />
+        ) : activeTab === 'themes' ? (
+          // Themes View
+          <ThemePanel
+            themes={themesData?.themes || []}
+            onSelectTheme={(theme) => themeModal.open(theme)}
+            loading={themesLoading}
+          />
+        ) : activeTab === 'watchlist' ? (
+          // Watchlist View
+          <WatchlistPanel
+            items={watchlistData?.items || []}
+            loading={watchlistLoading}
+            onAddNew={() => setWatchlistAddModalOpen(true)}
+            onDismiss={handleDismissWatchlistItem}
+            onSnooze={handleSnoozeWatchlistItem}
+            onRestore={handleRestoreWatchlistItem}
+            onDelete={handleDeleteWatchlistItem}
+            onViewTheme={(theme) => { setActiveTab('themes'); themeModal.open(theme); }}
+          />
         ) : activeTab === 'all' ? (
           // All News View
           <div className="space-y-6">
@@ -201,16 +300,45 @@ function App() {
               <div className="space-y-6">
                 <CalendarPanel events={calendarData?.events || []} />
                 
+                {/* Active Themes Summary */}
                 <div>
                   <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4" />
-                    Active Investigations
+                    <Flame className="w-4 h-4 text-orange-500" />
+                    Active Themes
                   </h3>
-                  <InvestigationPanel
-                    investigations={(investigationsData?.investigations || []).slice(0, 3)}
-                    onSelect={(inv) => investigationModal.open(inv)}
-                    compact
-                  />
+                  {themesData?.themes?.filter(t => t.status === 'active').slice(0, 3).map(theme => (
+                    <div
+                      key={theme.id}
+                      onClick={() => { setActiveTab('themes'); themeModal.open(theme); }}
+                      className="p-3 mb-2 bg-white rounded-lg border border-gray-200 hover:border-orange-300 cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm">🔥</span>
+                        <span className="text-sm font-medium text-gray-900 truncate">{theme.name_vi || theme.name}</span>
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">Strength: {theme.strength?.toFixed(1)}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Active Signals Summary */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                    <Radio className="w-4 h-4 text-purple-500" />
+                    Active Signals
+                  </h3>
+                  {signalsData?.signals?.filter(s => s.status === 'pending').slice(0, 3).map(signal => (
+                    <div
+                      key={signal.id}
+                      onClick={() => { setActiveTab('signals'); signalModal.open(signal); }}
+                      className="p-3 mb-2 bg-white rounded-lg border border-gray-200 hover:border-purple-300 cursor-pointer"
+                    >
+                      <div className="text-sm font-medium text-gray-900 line-clamp-2">{signal.prediction_text}</div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        {signal.target_indicator} • {signal.confidence}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -254,16 +382,51 @@ function App() {
             <div className="lg:col-span-1 space-y-6">
               <CalendarPanel events={calendarData?.events || []} />
               
+              {/* Active Themes */}
               <div>
                 <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4" />
-                  Investigations
+                  <Flame className="w-4 h-4 text-orange-500" />
+                  Themes
                 </h3>
-                <InvestigationPanel
-                  investigations={(investigationsData?.investigations || []).slice(0, 5)}
-                  onSelect={(inv) => investigationModal.open(inv)}
-                  compact
-                />
+                {themesData?.themes?.filter(t => t.status === 'active' || t.strength >= 5).slice(0, 3).map(theme => (
+                  <div
+                    key={theme.id}
+                    onClick={() => { setActiveTab('themes'); themeModal.open(theme); }}
+                    className="p-3 mb-2 bg-white rounded-lg border border-gray-200 hover:border-orange-300 cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">🔥</span>
+                      <span className="text-sm font-medium text-gray-900 truncate">{theme.name_vi || theme.name}</span>
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">Strength: {theme.strength?.toFixed(1)}</div>
+                  </div>
+                ))}
+                {(!themesData?.themes || themesData.themes.filter(t => t.status === 'active' || t.strength >= 5).length === 0) && (
+                  <div className="text-sm text-gray-400 py-2">No active themes</div>
+                )}
+              </div>
+              
+              {/* Active Signals */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                  <Radio className="w-4 h-4 text-purple-500" />
+                  Signals
+                </h3>
+                {signalsData?.signals?.filter(s => s.status === 'pending').slice(0, 3).map(signal => (
+                  <div
+                    key={signal.id}
+                    onClick={() => { setActiveTab('signals'); signalModal.open(signal); }}
+                    className="p-3 mb-2 bg-white rounded-lg border border-gray-200 hover:border-purple-300 cursor-pointer"
+                  >
+                    <div className="text-sm font-medium text-gray-900 line-clamp-2">{signal.prediction_text}</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {signal.target_indicator} • {signal.confidence}
+                    </div>
+                  </div>
+                ))}
+                {(!signalsData?.signals || signalsData.signals.filter(s => s.status === 'pending').length === 0) && (
+                  <div className="text-sm text-gray-400 py-2">No active signals</div>
+                )}
               </div>
             </div>
           </div>
@@ -278,9 +441,11 @@ function App() {
             {latestRun?.run && (
               <>
                 <span>•</span>
-                <span>Events today: {latestRun.run.events_extracted || 0}</span>
+                <span>Events: {latestRun.run.events_extracted || 0}</span>
                 <span>•</span>
-                <span>Investigations: {investigationsData?.investigations?.length || 0}</span>
+                <span>Signals: {signalsData?.signals?.filter(s => s.status === 'pending').length || 0}</span>
+                <span>•</span>
+                <span>Themes: {themesData?.themes?.filter(t => t.status === 'active').length || 0}</span>
               </>
             )}
           </div>
@@ -300,13 +465,36 @@ function App() {
         />
       )}
 
-      {/* Investigation Detail Modal */}
-      {investigationModal.isOpen && (
-        <InvestigationDetail
-          investigation={investigationModal.data}
-          onClose={investigationModal.close}
+      {/* Signal Detail Modal */}
+      {signalModal.isOpen && (
+        <SignalDetail
+          signal={signalModal.data}
+          onClose={signalModal.close}
         />
       )}
+
+      {/* Theme Detail Modal */}
+      {themeModal.isOpen && (
+        <ThemeDetail
+          theme={themeModal.data}
+          onClose={themeModal.close}
+          onViewEvent={(event) => {
+            themeModal.close();
+            eventModal.open(event);
+          }}
+          onViewSignal={(signal) => {
+            themeModal.close();
+            signalModal.open(signal);
+          }}
+        />
+      )}
+
+      {/* Watchlist Add Modal */}
+      <WatchlistAddModal
+        isOpen={watchlistAddModalOpen}
+        onClose={() => setWatchlistAddModalOpen(false)}
+        onSubmit={handleAddWatchlistItem}
+      />
     </div>
   );
 }
