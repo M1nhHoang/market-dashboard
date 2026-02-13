@@ -89,11 +89,28 @@ class Pipeline:
             await init_engine()
             
             # ============================================
+            # Step 0: Get existing titles for deduplication
+            # ============================================
+            logger.info("Step 0: Fetching existing titles for deduplication...")
+            
+            existing_titles_by_source = {}
+            async with get_session() as session:
+                events_repo = EventRepository(session)
+                # Get titles for each source we'll crawl
+                for source in ["sbv", "vneconomy", "cafef", "vnexpress"]:
+                    titles = await events_repo.get_recent_titles(source=source, days=self.lookback_days)
+                    existing_titles_by_source[source] = titles
+                    logger.debug(f"Found {len(titles)} existing titles for {source}")
+            
+            total_existing = sum(len(t) for t in existing_titles_by_source.values())
+            logger.info(f"Found {total_existing} existing titles across all sources")
+            
+            # ============================================
             # Step 1: Crawl data from sources
             # ============================================
             logger.info("Step 1: Crawling data from sources...")
             
-            crawler_outputs = await self._crawl_all_sources()
+            crawler_outputs = await self._crawl_all_sources(existing_titles_by_source)
             
             results["steps"]["crawl"] = {
                 "sources": [o.source for o in crawler_outputs],
@@ -187,24 +204,18 @@ class Pipeline:
                 logger.info(f"Step 4: Processing {len(all_events)} events through LLM pipeline...")
                 
                 # ============================================
-                # Step 5: Layer 1 - Classification + Dedup
+                # Step 5: Layer 1 - Classification
                 # ============================================
+                # Note: Deduplication is now done at crawler level by title matching.
+                # We still compute hash for storage but skip DB lookup here.
                 logger.info("Step 5: Layer 1 - Classification...")
                 
                 classified_events = []
-                duplicates_skipped = 0
                 irrelevant_skipped = 0
                 
                 for event in all_events:
-                    # Compute hash for deduplication
+                    # Compute hash for storage (not for dedup - that's done in crawler)
                     hash_value = self._compute_hash(event)
-                    
-                    # Check if already exists
-                    existing = await events_repo.find_by_hash(hash_value)
-                    if existing:
-                        duplicates_skipped += 1
-                        logger.debug(f"Skipping duplicate: {event.title[:50]}...")
-                        continue
                     
                     # Classify
                     news_dict = self._event_to_dict(event)
@@ -225,10 +236,9 @@ class Pipeline:
                 results["steps"]["classify"] = {
                     "total": len(all_events),
                     "relevant": len(classified_events),
-                    "duplicates_skipped": duplicates_skipped,
                     "irrelevant_skipped": irrelevant_skipped,
                 }
-                logger.info(f"Classification: {len(classified_events)}/{len(all_events)} relevant (skipped {duplicates_skipped} dupes)")
+                logger.info(f"Classification: {len(classified_events)}/{len(all_events)} relevant ({irrelevant_skipped} irrelevant)")
                 
                 # ============================================
                 # Step 6: Build context for scoring
@@ -608,10 +618,20 @@ class Pipeline:
     # HELPER METHODS
     # ============================================
     
-    async def _crawl_all_sources(self) -> List[CrawlerOutput]:
-        """Crawl all configured sources and return transformed outputs."""
+    async def _crawl_all_sources(
+        self, 
+        existing_titles_by_source: dict[str, set] = None
+    ) -> List[CrawlerOutput]:
+        """
+        Crawl all configured sources and return transformed outputs.
+        
+        Args:
+            existing_titles_by_source: Dict mapping source name to set of existing titles
+                                       for deduplication at crawler level.
+        """
         from crawlers import SBVCrawler
         
+        existing_titles_by_source = existing_titles_by_source or {}
         outputs = []
         
         # SBV Crawler
@@ -625,7 +645,8 @@ class Pipeline:
             raw_result = await crawler.run(
                 max_articles=None,  # Fetch all articles with full content
                 extract_pdf=True,   # Extract text from PDF attachments
-                save_raw=False       # Save raw output to data/raw for debugging
+                save_raw=False,     # Save raw output to data/raw for debugging
+                existing_titles=existing_titles_by_source.get("sbv", set()),
             )
             
             if raw_result.success:
@@ -639,7 +660,79 @@ class Pipeline:
         except Exception as e:
             logger.error(f"SBV crawler error: {e}")
         
-        # TODO: Add more crawlers here (News, Global, Calendar)
+        # VnEconomy Crawler
+        try:
+            logger.info("Crawling VnEconomy...")
+            from crawlers.vneconomy_crawler import VnEconomyCrawler
+            
+            vneconomy_crawler = VnEconomyCrawler(data_dir=self.data_dir)
+            
+            # Use run() to get full article content
+            # max_articles=20 to limit during initial testing, set to None for full crawl
+            raw_result = await vneconomy_crawler.run(
+                max_articles=20,  # Limit to 20 articles for faster runs
+                save_raw=False,   # Set True to save raw data for debugging
+                existing_titles=existing_titles_by_source.get("vneconomy", set()),
+            )
+            
+            if raw_result.success:
+                # Transform using crawler's transformer
+                output = vneconomy_crawler.transformer.transform(raw_result.to_dict())
+                outputs.append(output)
+                logger.info(f"VnEconomy: {output.summary()}")
+            else:
+                logger.warning(f"VnEconomy crawl failed: {raw_result.error}")
+                
+        except Exception as e:
+            logger.error(f"VnEconomy crawler error: {e}")
+        
+        # CafeF Crawler
+        try:
+            logger.info("Crawling CafeF...")
+            from crawlers.cafef_crawler import CafeFCrawler
+            
+            cafef_crawler = CafeFCrawler(data_dir=self.data_dir)
+            
+            raw_result = await cafef_crawler.run(
+                max_articles=20,  # Limit for faster runs
+                save_raw=False,
+                existing_titles=existing_titles_by_source.get("cafef", set()),
+            )
+            
+            if raw_result.success:
+                output = cafef_crawler.transformer.transform(raw_result.to_dict())
+                outputs.append(output)
+                logger.info(f"CafeF: {output.summary()}")
+            else:
+                logger.warning(f"CafeF crawl failed: {raw_result.error}")
+                
+        except Exception as e:
+            logger.error(f"CafeF crawler error: {e}")
+        
+        # VnExpress Crawler
+        try:
+            logger.info("Crawling VnExpress...")
+            from crawlers.vnexpress_crawler import VnExpressCrawler
+            
+            vnexpress_crawler = VnExpressCrawler(data_dir=self.data_dir)
+            
+            raw_result = await vnexpress_crawler.run(
+                max_articles=20,  # Limit for faster runs
+                save_raw=False,
+                existing_titles=existing_titles_by_source.get("vnexpress", set()),
+            )
+            
+            if raw_result.success:
+                output = vnexpress_crawler.transformer.transform(raw_result.to_dict())
+                outputs.append(output)
+                logger.info(f"VnExpress: {output.summary()}")
+            else:
+                logger.warning(f"VnExpress crawl failed: {raw_result.error}")
+                
+        except Exception as e:
+            logger.error(f"VnExpress crawler error: {e}")
+        
+        # TODO: Add more crawlers here (Global, Calendar)
         
         return outputs
     

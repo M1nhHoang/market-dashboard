@@ -2045,7 +2045,8 @@ class SBVCrawler(BaseCrawler):
         max_articles: Optional[int] = None,
         extract_pdf: bool = True,
         news_only: bool = False,
-        save_raw: bool = False
+        save_raw: bool = False,
+        existing_titles: Optional[set] = None,
     ) -> CrawlResult:
         """
         Run full crawl with content extraction and save to file.
@@ -2054,14 +2055,16 @@ class SBVCrawler(BaseCrawler):
         
         This method:
         1. Fetch homepage data (exchange rates, credit data, news list)
-        2. Fetch full content for each news article
-        3. Extract PDF attachments if available
-        4. Save results to file
+        2. Filter out articles already in database (by title)
+        3. Fetch full content for new articles only
+        4. Extract PDF attachments if available
+        5. Save results to file
         
         Args:
             max_articles: Maximum articles to fetch full content. If None, fetch all articles.
             extract_pdf: Whether to extract PDF text (default: True)
             news_only: If True, only fetch news content, skip exchange rates etc.
+            existing_titles: Set of titles already in DB (skip fetching content for these)
             
         Returns:
             CrawlResult with all data
@@ -2115,10 +2118,25 @@ class SBVCrawler(BaseCrawler):
                     f"{len(cpi_data)} CPI data, {len(omo_data)} OMO data"
                 )
             
-            # Step 2: Fetch full content for news articles
-            # If max_articles is None, fetch all articles
-            articles_to_fetch = news_items if max_articles is None else news_items[:max_articles]
-            logger.info(f"[{self.name}] Step 2: Fetching full content for {len(articles_to_fetch)} articles...")
+            # Step 2: Filter out articles already in database
+            existing_titles = existing_titles or set()
+            new_news_items = []
+            skipped_count = 0
+            
+            for item in news_items:
+                title = (item.get("title") or "").strip()
+                if title and title in existing_titles:
+                    skipped_count += 1
+                    logger.debug(f"[{self.name}] Skipping duplicate: {title[:50]}...")
+                    continue
+                new_news_items.append(item)
+            
+            if skipped_count > 0:
+                logger.info(f"[{self.name}] Skipped {skipped_count} existing articles, {len(new_news_items)} new to fetch")
+            
+            # Step 3: Fetch full content for new articles only
+            articles_to_fetch = new_news_items if max_articles is None else new_news_items[:max_articles]
+            logger.info(f"[{self.name}] Step 3: Fetching full content for {len(articles_to_fetch)} articles...")
             
             for i, news_item in enumerate(articles_to_fetch, 1):
                 url = news_item.get('source_url', '')

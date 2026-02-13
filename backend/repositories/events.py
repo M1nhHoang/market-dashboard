@@ -158,6 +158,33 @@ class EventRepository(BaseRepository[Event]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
     
+    async def get_recent_titles(
+        self,
+        source: Optional[str] = None,
+        days: int = 7
+    ) -> set[str]:
+        """
+        Get set of recent event titles for deduplication at crawler level.
+        
+        Args:
+            source: Filter by source (e.g., 'sbv', 'cafef'). None = all sources.
+            days: How many days back to look (default: 7)
+            
+        Returns:
+            Set of titles (stripped, original case)
+        """
+        cutoff_date = date.today() - timedelta(days=days)
+        
+        stmt = select(Event.title).where(Event.run_date >= cutoff_date)
+        
+        if source:
+            stmt = stmt.where(Event.source == source)
+        
+        result = await self.session.execute(stmt)
+        titles = result.scalars().all()
+        
+        return {t.strip() for t in titles if t}
+    
     # ============================================
     # EVENT CREATION
     # ============================================

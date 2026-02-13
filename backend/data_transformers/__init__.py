@@ -14,9 +14,15 @@ Structure:
     data_transformers/
     ├── models.py           # Shared models (CrawlerOutput, MetricRecord, etc.)
     ├── base.py             # BaseTransformer abstract class
-    └── sbv/                # SBV source
-        ├── transformer.py  # SBVTransformer
-        └── mappings.py     # SBV-specific mappings
+    ├── sbv/                # SBV source
+    │   ├── transformer.py  # SBVTransformer
+    │   └── mappings.py     # SBV-specific mappings
+    ├── vneconomy/          # VnEconomy source
+    │   └── transformer.py  # VnEconomyTransformer
+    ├── cafef/              # CafeF source
+    │   └── transformer.py  # CafeFTransformer
+    └── vnexpress/          # VnExpress source
+        └── transformer.py  # VnExpressTransformer
 """
 
 from .models import (
@@ -29,6 +35,9 @@ from .models import (
 )
 from .base import BaseTransformer
 from .sbv import SBVTransformer
+from .vneconomy import VnEconomyTransformer
+from .cafef import CafeFTransformer
+from .vnexpress import VnExpressTransformer
 
 __all__ = [
     # Models
@@ -42,4 +51,7 @@ __all__ = [
     # Transformers
     "BaseTransformer",
     "SBVTransformer",
+    "VnEconomyTransformer",
+    "CafeFTransformer",
+    "VnExpressTransformer",
 ]
