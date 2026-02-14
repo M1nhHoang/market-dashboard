@@ -2081,6 +2081,16 @@ class SBVCrawler(BaseCrawler):
             "total_pdf_chars": 0
         }
         
+        # Initialize counters for metadata
+        skipped_count = 0
+        exchange_rates = []
+        credit_data = []
+        gold_prices = []
+        policy_rates = []
+        interbank_rates = []
+        cpi_data = []
+        omo_data = []
+        
         try:
             # Step 1: Fetch homepage data
             logger.info(f"[{self.name}] Step 1: Fetching homepage data...")
@@ -2193,15 +2203,8 @@ class SBVCrawler(BaseCrawler):
                     stats["articles_failed"] += 1
                     errors.append(f"Article fetch error: {str(e)}")
             
-            # Add remaining news items without full content (list only) - only if max_articles is set
-            remaining_news = [] if max_articles is None else news_items[max_articles:]
-            for item in remaining_news:
-                all_data.append({
-                    **item,
-                    "content": "",
-                    "fetch_success": None,  # Not attempted
-                    "fetch_note": "Content not fetched (limit reached)"
-                })
+            # NOTE: We only return articles that were actually fetched.
+            # Articles beyond max_articles or with existing titles are NOT included.
             
             # Log summary
             logger.info(
@@ -2231,7 +2234,7 @@ class SBVCrawler(BaseCrawler):
                 "category": "crawl_stats",
                 "name": "SBV Crawl Statistics",
                 "stats": stats,
-                "total_items": len(all_data) - 1,  # Exclude this metadata item
+                "total_items": len(all_data),
                 "exchange_rates_count": len(exchange_rates) if not news_only else 0,
                 "credit_data_count": len(credit_data) if not news_only else 0,
                 "gold_prices_count": len(gold_prices) if not news_only else 0,
@@ -2241,7 +2244,7 @@ class SBVCrawler(BaseCrawler):
                 "omo_data_count": len(omo_data) if not news_only else 0,
                 "news_with_content": stats["articles_fetched"],
                 "news_failed": stats["articles_failed"],
-                "news_list_only": len(remaining_news)
+                "news_skipped_existing": skipped_count,
             }
             all_data.insert(0, metadata_item)
         

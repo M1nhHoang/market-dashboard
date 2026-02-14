@@ -631,15 +631,8 @@ class VnEconomyCrawler(BaseCrawler):
                     })
                     stats["articles_failed"] += 1
             
-            # Add remaining items without full content
-            if max_articles is not None:
-                for item in news_items[max_articles:]:
-                    all_data.append({
-                        **item,
-                        "content": "",
-                        "fetch_success": False,
-                        "reason": "skipped",
-                    })
+            # NOTE: We only return articles that were actually fetched.
+            # Articles beyond max_articles or with existing titles are NOT included.
             
             # Add metadata
             all_data.insert(0, {

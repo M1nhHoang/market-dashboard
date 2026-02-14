@@ -5,6 +5,8 @@ Scores market-relevant news and performs causal analysis.
 Generates signals (predictions) and links to themes.
 """
 import json
+import re
+import time
 from pathlib import Path
 
 from loguru import logger
@@ -13,6 +15,11 @@ from config import settings
 from llm import get_client, LLMClient
 from prompts import PromptLoader
 from .models import ScoringResult, SignalOutput, ThemeLink
+
+
+class ScoringError(Exception):
+    """Raised when scoring fails after all retries are exhausted."""
+    pass
 
 
 class Scorer:
@@ -26,7 +33,9 @@ class Scorer:
     def __init__(
         self, 
         client: LLMClient = None,
-        templates_path: Path = None
+        templates_path: Path = None,
+        max_retries: int = 3,
+        retry_delay: float = 1.0
     ):
         """
         Initialize scorer.
@@ -34,9 +43,13 @@ class Scorer:
         Args:
             client: LLM client instance (creates default if not provided)
             templates_path: Path to causal templates JSON file
+            max_retries: Maximum number of retry attempts on parse failure
+            retry_delay: Delay in seconds between retries
         """
         self.client = client or get_client()
         self.prompt_loader = PromptLoader()
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
         
         # Load causal templates
         self.templates_path = templates_path or (settings.BASE_DIR / "templates" / "causal_templates.json")
@@ -93,19 +106,32 @@ class Scorer:
             causal_templates=json.dumps(self.templates, ensure_ascii=False, indent=2)
         )
         
-        try:
-            response = self.client.generate(
-                prompt=prompt,
-                temperature=0.3,
-            )
-            
-            raw_output = response.content
-            result = self._parse_response(raw_output)
-            return result
-            
-        except Exception as e:
-            logger.exception(f"LLM error in scorer: {e}")
-            return self._error_result(str(e))
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                response = self.client.generate(
+                    prompt=prompt,
+                    temperature=0.3,
+                )
+                
+                raw_output = response.content
+                result = self._parse_response(raw_output)
+                return result
+                
+            except json.JSONDecodeError as e:
+                last_error = e
+                logger.warning(f"Scoring parse failed (attempt {attempt + 1}/{self.max_retries}): {e}")
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay)
+                continue
+                
+            except Exception as e:
+                # Non-retryable error (API error, etc.)
+                logger.exception(f"LLM error in scorer: {e}")
+                raise ScoringError(f"LLM error: {e}") from e
+        
+        # All retries exhausted
+        raise ScoringError(f"Scoring failed after {self.max_retries} attempts: {last_error}")
     
     def score_batch(
         self,
@@ -158,52 +184,58 @@ class Scorer:
         return results
     
     def _parse_response(self, raw_output: str) -> ScoringResult:
-        """Parse LLM JSON response."""
-        try:
-            # Clean up response
-            text = raw_output.strip()
-            if text.startswith('```'):
-                text = text.split('```')[1]
-                if text.startswith('json'):
-                    text = text[4:]
-            text = text.strip()
-            
-            data = json.loads(text)
-            
-            # Parse signal output
-            signal_data = data.get('signal_output', {})
-            signal_output = SignalOutput(
-                create_signal=signal_data.get('create_signal', False),
-                prediction=signal_data.get('prediction'),
-                target_indicator=signal_data.get('target_indicator'),
-                direction=signal_data.get('direction'),
-                target_range_low=signal_data.get('target_range_low'),
-                target_range_high=signal_data.get('target_range_high'),
-                confidence=signal_data.get('confidence', 'medium'),
-                timeframe_days=signal_data.get('timeframe_days'),
-                reasoning=signal_data.get('reasoning'),
-            )
-            
-            # Parse theme link
-            theme_data = data.get('theme_link', {})
-            theme_link = ThemeLink(
-                existing_theme_id=theme_data.get('existing_theme_id'),
-                create_new_theme=theme_data.get('create_new_theme', False),
-                new_theme=theme_data.get('new_theme'),
-            )
-            
-            return ScoringResult(
-                base_score=data.get('base_score', 50),
-                score_factors=data.get('score_factors', {}),
-                causal_analysis=data.get('causal_analysis', {}),
-                signal_output=signal_output,
-                theme_link=theme_link,
-                raw_output=raw_output
-            )
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse scoring response: {e}")
-            logger.debug(f"Raw output: {raw_output}")
-            return self._error_result(f"JSON parse error: {e}")
+        """
+        Parse LLM JSON response.
+        
+        Raises:
+            json.JSONDecodeError: If response cannot be parsed as JSON
+        """
+        # Clean up response - remove markdown code blocks if present
+        text = raw_output.strip()
+        if text.startswith('```'):
+            text = text.split('```')[1]
+            if text.startswith('json'):
+                text = text[4:]
+        text = text.strip()
+        
+        # Try to fix common JSON issues
+        # Fix trailing commas before closing brackets
+        text = re.sub(r',\s*}', '}', text)
+        text = re.sub(r',\s*]', ']', text)
+        
+        # Parse JSON - let JSONDecodeError propagate for retry
+        data = json.loads(text)
+        
+        # Parse signal output
+        signal_data = data.get('signal_output', {})
+        signal_output = SignalOutput(
+            create_signal=signal_data.get('create_signal', False),
+            prediction=signal_data.get('prediction'),
+            target_indicator=signal_data.get('target_indicator'),
+            direction=signal_data.get('direction'),
+            target_range_low=signal_data.get('target_range_low'),
+            target_range_high=signal_data.get('target_range_high'),
+            confidence=signal_data.get('confidence', 'medium'),
+            timeframe_days=signal_data.get('timeframe_days'),
+            reasoning=signal_data.get('reasoning'),
+        )
+        
+        # Parse theme link
+        theme_data = data.get('theme_link', {})
+        theme_link = ThemeLink(
+            existing_theme_id=theme_data.get('existing_theme_id'),
+            create_new_theme=theme_data.get('create_new_theme', False),
+            new_theme=theme_data.get('new_theme'),
+        )
+        
+        return ScoringResult(
+            base_score=data.get('base_score', 50),
+            score_factors=data.get('score_factors', {}),
+            causal_analysis=data.get('causal_analysis', {}),
+            signal_output=signal_output,
+            theme_link=theme_link,
+            raw_output=raw_output
+        )
     
     def _error_result(self, error_msg: str) -> ScoringResult:
         """Return a default result on error."""

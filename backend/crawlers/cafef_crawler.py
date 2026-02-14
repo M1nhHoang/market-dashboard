@@ -568,13 +568,7 @@ class CafeFCrawler(BaseCrawler):
         
         results = []
         
-        for i, item in enumerate(articles, 1):
-            if max_articles and i > max_articles:
-                # Skip content fetch, keep metadata only
-                item["content"] = ""
-                results.append(item)
-                continue
-            
+        for i, item in enumerate(articles_to_fetch, 1):
             url = item.get("source_url", "")
             title_short = item.get("title", "")[:50]
             logger.info(f"[cafef] [{i}/{len(articles_to_fetch)}] {title_short}...")

@@ -10,12 +10,13 @@ Components:
 """
 
 from .models import ClassificationResult
-from .classifier import Classifier
+from .classifier import Classifier, ClassificationError
 from .indicator_classifier import classify_indicator_data
 
 
 __all__ = [
     "Classifier",
     "ClassificationResult",
+    "ClassificationError",
     "classify_indicator_data",
 ]

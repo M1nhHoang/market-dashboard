@@ -5,6 +5,8 @@ Filters news by market relevance and assigns categories.
 This layer runs on all raw news before scoring.
 """
 import json
+import time
+import re
 from typing import Optional
 
 from loguru import logger
@@ -12,6 +14,11 @@ from loguru import logger
 from llm import get_client, LLMClient
 from prompts import PromptLoader
 from .models import ClassificationResult
+
+
+class ClassificationError(Exception):
+    """Raised when classification fails after all retries."""
+    pass
 
 
 class Classifier:
@@ -24,25 +31,37 @@ class Classifier:
     Uses LLMClient interface (GLM by default).
     """
     
-    def __init__(self, client: Optional[LLMClient] = None):
+    def __init__(
+        self, 
+        client: Optional[LLMClient] = None,
+        max_retries: int = 3,
+        retry_delay: float = 2.0,
+    ):
         """
         Initialize classifier.
         
         Args:
             client: LLM client instance (creates default GLM client if not provided)
+            max_retries: Maximum number of retry attempts on failure
+            retry_delay: Delay in seconds between retries
         """
         self.client = client or get_client()
         self.prompt_loader = PromptLoader()
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
         
     def classify(self, news_item: dict) -> ClassificationResult:
         """
-        Classify a single news item.
+        Classify a single news item with retry mechanism.
         
         Args:
             news_item: Dict with keys: title, content, source, date
             
         Returns:
             ClassificationResult with relevance, category, and linked indicators
+            
+        Raises:
+            ClassificationError: If classification fails after all retries
         """
         prompt = self.prompt_loader.format(
             "classification",
@@ -52,26 +71,42 @@ class Classifier:
             date=news_item.get('date', news_item.get('published_at', ''))
         )
         
-        try:
-            response = self.client.generate(
-                prompt=prompt,
-                temperature=0.1,  # Low temp for consistent classification
-            )
-            
-            raw_output = response.content
-            result = self._parse_response(raw_output)
-            return result
-            
-        except Exception as e:
-            logger.error(f"LLM API error in classifier: {e}")
-            # Return as not relevant on error to avoid blocking pipeline
-            return ClassificationResult(
-                is_market_relevant=False,
-                category=None,
-                linked_indicators=[],
-                reasoning=f"Classification error: {str(e)}",
-                raw_output=""
-            )
+        last_error = None
+        
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                response = self.client.generate(
+                    prompt=prompt,
+                    temperature=0.1,  # Low temp for consistent classification
+                )
+                
+                raw_output = response.content
+                result = self._parse_response(raw_output)
+                return result
+                
+            except json.JSONDecodeError as e:
+                last_error = e
+                logger.warning(
+                    f"Classification parse error (attempt {attempt}/{self.max_retries}): {e}"
+                )
+                if attempt < self.max_retries:
+                    logger.info(f"Retrying in {self.retry_delay}s...")
+                    time.sleep(self.retry_delay)
+                    
+            except Exception as e:
+                last_error = e
+                logger.error(
+                    f"LLM API error in classifier (attempt {attempt}/{self.max_retries}): {e}"
+                )
+                if attempt < self.max_retries:
+                    logger.info(f"Retrying in {self.retry_delay}s...")
+                    time.sleep(self.retry_delay)
+        
+        # All retries exhausted - raise exception
+        title_preview = news_item.get('title', '')[:50]
+        error_msg = f"Classification failed after {self.max_retries} attempts for: {title_preview}. Last error: {last_error}"
+        logger.error(error_msg)
+        raise ClassificationError(error_msg)
     
     def classify_batch(self, news_items: list[dict]) -> list[dict]:
         """
@@ -108,36 +143,32 @@ class Classifier:
         return [item for item in classified_items if item.get('is_market_relevant')]
     
     def _parse_response(self, raw_output: str) -> ClassificationResult:
-        """Parse LLM JSON response."""
-        try:
-            # Clean up response - remove markdown code blocks if present
-            text = raw_output.strip()
-            if text.startswith('```'):
-                text = text.split('```')[1]
-                if text.startswith('json'):
-                    text = text[4:]
-            text = text.strip()
-            
-            data = json.loads(text)
-            
-            return ClassificationResult(
-                is_market_relevant=data.get('is_market_relevant', False),
-                category=data.get('category') if data.get('category') != 'null' else None,
-                linked_indicators=data.get('linked_indicators', []),
-                reasoning=data.get('reasoning', ''),
-                raw_output=raw_output
-            )
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse classification response: {e}")
-            logger.debug(f"Raw output: {raw_output}")
-            
-            # Try to extract is_market_relevant from text
-            is_relevant = '"is_market_relevant": true' in raw_output.lower()
-            
-            return ClassificationResult(
-                is_market_relevant=is_relevant,
-                category=None,
-                linked_indicators=[],
-                reasoning="Parse error - extracted from raw",
-                raw_output=raw_output
-            )
+        """
+        Parse LLM JSON response.
+        
+        Raises:
+            json.JSONDecodeError: If response cannot be parsed as JSON
+        """
+        # Clean up response - remove markdown code blocks if present
+        text = raw_output.strip()
+        if text.startswith('```'):
+            text = text.split('```')[1]
+            if text.startswith('json'):
+                text = text[4:]
+        text = text.strip()
+        
+        # Try to fix common JSON issues
+        # Fix trailing commas before closing brackets
+        text = re.sub(r',\s*}', '}', text)
+        text = re.sub(r',\s*]', ']', text)
+        
+        # Parse JSON - let JSONDecodeError propagate for retry
+        data = json.loads(text)
+        
+        return ClassificationResult(
+            is_market_relevant=data.get('is_market_relevant', False),
+            category=data.get('category') if data.get('category') != 'null' else None,
+            linked_indicators=data.get('linked_indicators', []),
+            reasoning=data.get('reasoning', ''),
+            raw_output=raw_output
+        )

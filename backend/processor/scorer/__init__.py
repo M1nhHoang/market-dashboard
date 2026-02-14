@@ -10,12 +10,13 @@ Components:
 """
 
 from .models import ScoringResult
-from .scorer import Scorer
+from .scorer import Scorer, ScoringError
 from .context_summary import generate_context_summary
 
 
 __all__ = [
     "Scorer",
     "ScoringResult",
+    "ScoringError",
     "generate_context_summary",
 ]
