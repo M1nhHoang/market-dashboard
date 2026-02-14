@@ -366,7 +366,7 @@ class Pipeline:
                         causal_analysis = scoring.causal_analysis
                     
                     try:
-                        # Create event
+                        # Create event (returns None if duplicate hash exists)
                         new_event = await events_repo.create_event(
                             title=event.title,
                             content=event.content,
@@ -380,6 +380,11 @@ class Pipeline:
                             published_at=event.published_at,
                             hash_value=hash_value,
                         )
+                        
+                        # Skip if duplicate event (already exists)
+                        if new_event is None:
+                            logger.debug(f"Skipping duplicate event: {event.title[:50]}...")
+                            continue
                         
                         # Update scores
                         await events_repo.update_scores(
@@ -404,49 +409,61 @@ class Pipeline:
                         # Handle signal output from scoring
                         if scoring and scoring.signal_output:
                             sig_out = scoring.signal_output
-                            if sig_out.get("creates_new"):
-                                new_sig = sig_out.get("new_signal", {})
-                                if new_sig.get("prediction"):
-                                    expires_at = None
-                                    if new_sig.get("timeframe_days"):
-                                        expires_at = datetime.now() + timedelta(days=new_sig["timeframe_days"])
-                                    
-                                    await signals_repo.create_signal(
-                                        prediction=new_sig.get("prediction"),
-                                        source_event_id=new_event.id,
-                                        target_indicator=new_sig.get("target_indicator"),
-                                        target_range_low=new_sig.get("target_range_low"),
-                                        target_range_high=new_sig.get("target_range_high"),
-                                        direction=new_sig.get("direction"),
-                                        confidence=new_sig.get("confidence", "medium"),
-                                        timeframe_days=new_sig.get("timeframe_days"),
-                                        expires_at=expires_at,
-                                        reasoning=new_sig.get("reasoning"),
-                                        related_indicators=classification.linked_indicators or [],
-                                    )
-                                    signals_created += 1
+                            # Check if signal should be created (SignalOutput is a dataclass)
+                            if sig_out.create_signal and sig_out.prediction:
+                                expires_at = None
+                                if sig_out.timeframe_days:
+                                    expires_at = datetime.now() + timedelta(days=sig_out.timeframe_days)
+                                
+                                await signals_repo.create_signal(
+                                    prediction=sig_out.prediction,
+                                    source_event_id=new_event.id,
+                                    target_indicator=sig_out.target_indicator,
+                                    target_range_low=sig_out.target_range_low,
+                                    target_range_high=sig_out.target_range_high,
+                                    direction=sig_out.direction,
+                                    confidence=sig_out.confidence or "medium",
+                                    timeframe_days=sig_out.timeframe_days,
+                                    expires_at=expires_at,
+                                    reasoning=sig_out.reasoning,
+                                    related_indicators=classification.linked_indicators or [],
+                                )
+                                signals_created += 1
                         
                         # Handle theme link from scoring
                         if scoring and scoring.theme_link:
                             theme_link = scoring.theme_link
-                            theme_name = theme_link.get("theme_name")
-                            if theme_name:
-                                # Try to find existing theme
-                                existing_theme = await themes_repo.get_by_name(theme_name)
+                            # ThemeLink is a dataclass - check for existing_theme_id or new_theme
+                            
+                            # Link to existing theme by ID
+                            if theme_link.existing_theme_id:
+                                existing_theme = await themes_repo.get(theme_link.existing_theme_id)
                                 if existing_theme:
-                                    # Add event to existing theme
                                     await themes_repo.add_event(existing_theme.id, new_event.id)
                                     themes_updated += 1
-                                elif theme_link.get("creates_new"):
-                                    # Create new theme
-                                    await themes_repo.create_theme(
-                                        name=theme_name,
-                                        event_id=new_event.id,
-                                        initial_strength=theme_link.get("strength", 50),
-                                    )
+                            
+                            # Create new theme
+                            elif theme_link.create_new_theme and theme_link.new_theme:
+                                new_theme_data = theme_link.new_theme
+                                theme_name = new_theme_data.get("name")
+                                if theme_name:
+                                    # Check if theme already exists by name
+                                    existing_theme = await themes_repo.get_by_name(theme_name)
+                                    if existing_theme:
+                                        await themes_repo.add_event(existing_theme.id, new_event.id)
+                                    else:
+                                        await themes_repo.create_theme(
+                                            name=theme_name,
+                                            name_vi=new_theme_data.get("name_vi"),
+                                            description=new_theme_data.get("description"),
+                                            event_id=new_event.id,
+                                            related_indicators=classification.linked_indicators or [],
+                                        )
                                     themes_updated += 1
                         
                     except Exception as e:
+                        # Rollback to clean session state before continuing
+                        await session.rollback()
                         logger.error(f"Failed to save event {event.title[:50]}: {e}")
                 
                 results["steps"]["save"] = {
@@ -523,14 +540,20 @@ class Pipeline:
                     trigger_event_id = None
                     
                     if item.trigger_type == "keyword":
-                        # Check if keyword appears in today's events
-                        keyword = item.trigger_condition
-                        for se in scored_events:
-                            event = se["event"]
-                            if keyword.lower() in (event.title or "").lower() or keyword.lower() in (event.content or "").lower():
-                                triggered = True
-                                trigger_event_id = event.id if hasattr(event, 'id') else None
-                                break
+                        # Check if keywords appear in today's events
+                        keywords = item.trigger_keywords or []
+                        if keywords:
+                            for se in scored_events:
+                                event = se["event"]
+                                title_lower = (event.title or "").lower()
+                                content_lower = (event.content or "").lower()
+                                for keyword in keywords:
+                                    if keyword.lower() in title_lower or keyword.lower() in content_lower:
+                                        triggered = True
+                                        trigger_event_id = event.id if hasattr(event, 'id') else None
+                                        break
+                                if triggered:
+                                    break
                     
                     elif item.trigger_type == "indicator":
                         # Check indicator threshold
@@ -541,13 +564,9 @@ class Pipeline:
                     
                     elif item.trigger_type == "date":
                         # Check if trigger date reached
-                        if item.trigger_value:
-                            try:
-                                trigger_date = datetime.fromisoformat(item.trigger_value).date()
-                                if date.today() >= trigger_date:
-                                    triggered = True
-                            except:
-                                pass
+                        if item.trigger_date:
+                            if date.today() >= item.trigger_date:
+                                triggered = True
                     
                     if triggered:
                         await watchlist_repo.trigger(item.id, trigger_event_id)

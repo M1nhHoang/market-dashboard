@@ -202,12 +202,19 @@ class EventRepository(BaseRepository[Event]):
         linked_indicators: List[str] = None,
         published_at: datetime = None,
         hash_value: str = None,
-    ) -> Event:
+    ) -> Optional[Event]:
         """
         Create a new event.
         
         Generates ID automatically if not provided.
+        Returns None if event with same hash already exists.
         """
+        # Check for duplicate hash first to avoid IntegrityError
+        if hash_value:
+            existing = await self.find_by_hash(hash_value)
+            if existing:
+                return None  # Duplicate event, skip creation
+        
         now = self.now()
         
         event = Event(
