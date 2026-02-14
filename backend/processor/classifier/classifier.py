@@ -72,15 +72,38 @@ class Classifier:
         )
         
         last_error = None
+        last_raw_output = None
+        original_task = f"Classify news: {news_item.get('title', '')[:100]}"
         
         for attempt in range(1, self.max_retries + 1):
             try:
+                # First attempt: use original prompt
+                # Subsequent attempts: use fix_json prompt with previous output
+                if attempt == 1 or not last_raw_output:
+                    current_prompt = prompt
+                else:
+                    # Use fix_json prompt for retry
+                    current_prompt = self.prompt_loader.format(
+                        "fix_json",
+                        original_task=original_task,
+                        invalid_response=last_raw_output,
+                        error_message=str(last_error),
+                    )
+                    logger.info(f"Using fix_json prompt for retry attempt {attempt}")
+                
                 response = self.client.generate(
-                    prompt=prompt,
+                    prompt=current_prompt,
                     temperature=0.1,  # Low temp for consistent classification
                 )
                 
                 raw_output = response.content
+                last_raw_output = raw_output
+                
+                # Log raw output for debugging if empty
+                if not raw_output or not raw_output.strip():
+                    logger.warning(f"Empty response from LLM (attempt {attempt})")
+                    raise json.JSONDecodeError("Empty response", "", 0)
+                
                 result = self._parse_response(raw_output)
                 return result
                 
@@ -89,8 +112,11 @@ class Classifier:
                 logger.warning(
                     f"Classification parse error (attempt {attempt}/{self.max_retries}): {e}"
                 )
+                if last_raw_output:
+                    logger.debug(f"Raw output preview: {last_raw_output[:200]}...")
                 if attempt < self.max_retries:
                     logger.info(f"Retrying in {self.retry_delay}s...")
+                    time.sleep(self.retry_delay)
                     time.sleep(self.retry_delay)
                     
             except Exception as e:
