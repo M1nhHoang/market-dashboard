@@ -103,7 +103,10 @@ class GLMClient(LLMClient):
             response = self._client.chat.completions.create(
                 model=self.model,
                 messages=api_messages,
-                max_tokens=max_tokens,
+                # NOTE: Do NOT use max_tokens with GLM-4.7 reasoning model!
+                # The model uses tokens for reasoning_content first, then generates content.
+                # Setting max_tokens can cause empty content when tokens are exhausted during reasoning.
+                # max_tokens=max_tokens,  # DISABLED - causes empty response issues
                 temperature=temperature,
             )
             
@@ -114,8 +117,14 @@ class GLMClient(LLMClient):
             choice = response.choices[0]
             usage = response.usage
             
+            # Handle reasoning model: use reasoning_content as fallback when content is empty
+            content = choice.message.content or ""
+            if not content and hasattr(choice.message, 'reasoning_content') and choice.message.reasoning_content:
+                logger.warning("Content empty, falling back to reasoning_content")
+                content = choice.message.reasoning_content
+            
             llm_response = LLMResponse(
-                content=choice.message.content,
+                content=content,
                 model=response.model,
                 usage={
                     "input_tokens": usage.prompt_tokens if usage else 0,

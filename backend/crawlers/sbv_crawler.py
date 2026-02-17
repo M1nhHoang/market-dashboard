@@ -157,13 +157,16 @@ class SBVCrawler(BaseCrawler):
         super().__init__("sbv", data_dir)
         
         self.base_url = "https://www.sbv.gov.vn"
-        self.gold_price_api = "https://www.sbv.gov.vn/o/goldprice/v1.0/gold-price"
+        # NOTE: Old SBV gold price API is deprecated (returns 404)
+        # Now using SJC direct API instead
+        self.gold_price_api = "https://sjc.com.vn/GoldPrice/Services/PriceService.ashx"
         self.interest_rate_url = "https://www.sbv.gov.vn/vi/lãi-suất1"
         self.cpi_url = "https://www.sbv.gov.vn/vi/cpi"
         self.omo_url = "https://sbv.gov.vn/vi/nghiệp-vụ-thị-trường-mở"
         
-        # Gold price sources (banks)
-        self.gold_price_banks = ["SJC", "TPBank", "BaoTinMinhChau"]
+        # Gold price sources - now only SJC (other sources deprecated)
+        # Old: ["SJC", "TPBank", "BaoTinMinhChau"] via SBV API
+        self.gold_price_banks = ["SJC"]
         
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -486,100 +489,83 @@ class SBVCrawler(BaseCrawler):
         banks: Optional[List[str]] = None
     ) -> List[GoldPriceData]:
         """
-        Fetch gold prices from SBV API.
+        Fetch gold prices from SJC API.
+        
+        NOTE: Old SBV API deprecated. Now fetching directly from SJC.
         
         Args:
             client: httpx AsyncClient instance
-            banks: List of bank codes to fetch. If None, fetch all configured banks.
-                   Available: SJC, TPBank, BaoTinMinhChau
+            banks: Ignored (kept for backward compatibility)
         
         Returns:
             List of GoldPriceData objects
         """
         gold_prices = []
-        banks_to_fetch = banks or self.gold_price_banks
         
-        for bank in banks_to_fetch:
+        try:
+            await self._rate_limit()
+            
+            url = self.gold_price_api
+            logger.info(f"[SBV] Fetching gold prices from SJC...")
+            
+            response = await client.get(url, headers=self.headers)
+            response.raise_for_status()
+            
+            # Check for empty response
+            if not response.text or response.text.strip() == '':
+                logger.warning(f"[SBV] Gold price API returned empty response")
+                return gold_prices
+            
+            # Parse JSON response
             try:
-                await self._rate_limit()
-                
-                url = f"{self.gold_price_api}?bank={bank}"
-                logger.info(f"[SBV] Fetching gold prices from {bank}...")
-                
-                response = await client.get(url, headers=self.headers)
-                response.raise_for_status()
-                
-                # Check for empty response
-                if not response.text or response.text.strip() == '':
-                    logger.warning(f"[SBV] Gold price API returned empty response for {bank}")
+                data = response.json()
+            except Exception as json_err:
+                logger.error(f"[SBV] Failed to parse gold price JSON: {json_err}")
+                return gold_prices
+            
+            if not data.get("success"):
+                logger.warning(f"[SBV] Gold price API returned non-success")
+                return gold_prices
+            
+            # Parse date from "HH:MM DD/MM/YYYY" format
+            latest_date_str = data.get("latestDate", "")
+            try:
+                # Format: "08:21 14/02/2026"
+                dt = datetime.strptime(latest_date_str, "%H:%M %d/%m/%Y")
+                formatted_date = dt.strftime("%Y-%m-%d")
+                formatted_updated = dt.strftime("%Y-%m-%d %H:%M")
+            except ValueError:
+                formatted_date = datetime.now().strftime("%Y-%m-%d")
+                formatted_updated = formatted_date
+            
+            items = data.get("data", [])
+            
+            for item in items:
+                try:
+                    gold_prices.append(GoldPriceData(
+                        organization=item.get("BranchName", ""),
+                        gold_type=item.get("TypeName", ""),
+                        buy_price=float(item.get("BuyValue", 0)),
+                        sell_price=float(item.get("SellValue", 0)),
+                        weight_unit="lượng",
+                        price_unit="VND",
+                        date=formatted_date,
+                        updated_at=formatted_updated,
+                        source="SJC",
+                        source_url=url
+                    ))
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"[SBV] Error parsing gold price item: {e}")
                     continue
-                
-                content_type = response.headers.get('content-type', '')
-                items = []
-                
-                # Handle JSON response
-                if 'application/json' in content_type:
-                    try:
-                        data = response.json()
-                        if data.get("status") != "success":
-                            logger.warning(f"[SBV] Gold price API returned non-success status for {bank}: {data.get('status')}")
-                            continue
-                        items = data.get("goldPriceItems", [])
-                    except Exception as json_err:
-                        logger.error(f"[SBV] Failed to parse JSON from {bank}: {json_err}")
-                        continue
-                
-                # Handle XML response (SBV sometimes returns XML instead of JSON)
-                elif 'application/xml' in content_type or response.text.strip().startswith('<'):
-                    items = self._parse_gold_price_xml(response.text, bank)
-                
-                else:
-                    logger.warning(f"[SBV] Gold price API returned unexpected content-type for {bank}: {content_type}")
-                    logger.debug(f"[SBV] Response text (first 500 chars): {response.text[:500]}")
-                    continue
-                
-                for item in items:
-                    try:
-                        # Parse date from DD/MM/YYYY to YYYY-MM-DD
-                        date_str = item.get("ngayDuLieu", "")
-                        try:
-                            dt = datetime.strptime(date_str, "%d/%m/%Y")
-                            formatted_date = dt.strftime("%Y-%m-%d")
-                        except ValueError:
-                            formatted_date = date_str
-                        
-                        updated_str = item.get("ngayCapNhat", "")
-                        try:
-                            dt = datetime.strptime(updated_str, "%d/%m/%Y")
-                            formatted_updated = dt.strftime("%Y-%m-%d")
-                        except ValueError:
-                            formatted_updated = updated_str
-                        
-                        gold_prices.append(GoldPriceData(
-                            organization=item.get("tenToChuc", ""),
-                            gold_type=item.get("loaiVang", ""),
-                            buy_price=float(item.get("giaMuaNiemYet", 0)),
-                            sell_price=float(item.get("giaBanNiemYet", 0)),
-                            weight_unit=item.get("khoiLuong", ""),
-                            price_unit=item.get("donViTinh", ""),
-                            date=formatted_date,
-                            updated_at=formatted_updated,
-                            source=bank,
-                            source_url=url
-                        ))
-                    except (ValueError, TypeError) as e:
-                        logger.warning(f"[SBV] Error parsing gold price item: {e}")
-                        continue
-                
-                logger.info(f"[SBV] Fetched {len(items)} gold prices from {bank}")
-                
-            except httpx.HTTPStatusError as e:
-                logger.error(f"[SBV] HTTP error fetching gold prices from {bank}: {e.response.status_code}")
-                logger.debug(f"[SBV] Response: {e.response.text[:500] if e.response.text else 'empty'}")
-            except httpx.RequestError as e:
-                logger.error(f"[SBV] Request error fetching gold prices from {bank}: {e}")
-            except Exception as e:
-                logger.error(f"[SBV] Error fetching gold prices from {bank}: {e}")
+            
+            logger.info(f"[SBV] Fetched {len(gold_prices)} gold prices from SJC")
+            
+        except httpx.HTTPStatusError as e:
+            logger.error(f"[SBV] HTTP error fetching gold prices: {e.response.status_code}")
+        except httpx.RequestError as e:
+            logger.error(f"[SBV] Request error fetching gold prices: {e}")
+        except Exception as e:
+            logger.error(f"[SBV] Error fetching gold prices: {e}")
         
         return gold_prices
     

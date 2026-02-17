@@ -101,8 +101,9 @@ def calculate_boost_factor(
     hot_topics = hot_topics or []
     
     # Theme boost - if event is part of an active theme
-    event_category = event.get('category', '')
-    event_title = event.get('title', '').lower()
+    event_category = event.get('category') or ''
+    event_title = event.get('title') or ''
+    event_title = event_title.lower()
     for theme_name in active_themes:
         if theme_name.lower() in event_title or theme_name.lower() in event_category.lower():
             boost *= BOOST_FOLLOW_UP  # Reuse the 20% boost
