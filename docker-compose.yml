@@ -52,8 +52,9 @@ services:
     networks:
       - mi-network
     # Override healthcheck - scheduler has no HTTP server
+    # Use 'ps aux | grep' since pgrep is not available in python:slim
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "scheduler.py"]
+      test: ["CMD-SHELL", "ps aux | grep -v grep | grep scheduler.py"]
       interval: 30s
       timeout: 10s
       retries: 3
