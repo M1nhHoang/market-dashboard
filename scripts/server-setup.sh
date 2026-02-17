@@ -14,10 +14,10 @@
 
 set -e
 
-# --- Configuration ---
-DOMAIN="trade.minhhoang.info"
-APP_DIR="/root/minhhoang/market-dashboard"
-SSL_DIR="/etc/ssl/cloudflare"
+# --- Configuration (CUSTOMIZE THESE) ---
+DOMAIN="${DOMAIN:-trade.minhhoang.info}"
+APP_DIR="${APP_DIR:-$(pwd)}"  # Default to current directory
+SSL_DIR="${SSL_DIR:-/etc/ssl/cloudflare}"
 
 # Colors for output
 RED='\033[0;31m'
