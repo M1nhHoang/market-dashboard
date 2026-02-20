@@ -215,12 +215,14 @@ export default function ThemeDetail({ theme, onClose, onViewEvent, onViewSignal 
                         </p>
                       </div>
                       <span className={`px-2 py-0.5 rounded text-xs ${
-                        sig.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                        sig.status === 'correct' ? 'bg-green-100 text-green-700' :
-                        sig.status === 'wrong' ? 'bg-red-100 text-red-700' :
+                        sig.status === 'active' ? 'bg-yellow-100 text-yellow-700' :
+                        sig.status === 'verified_correct' ? 'bg-green-100 text-green-700' :
+                        sig.status === 'verified_wrong' ? 'bg-red-100 text-red-700' :
                         'bg-gray-100 text-gray-600'
                       }`}>
-                        {sig.status}
+                        {sig.status === 'active' ? 'Active' : 
+                         sig.status === 'verified_correct' ? 'Correct' :
+                         sig.status === 'verified_wrong' ? 'Wrong' : sig.status}
                       </span>
                     </div>
                   </div>

@@ -30,11 +30,11 @@ export default function SignalDetail({ signal, onClose }) {
 
   const getStatusConfig = () => {
     switch (status?.toLowerCase()) {
-      case 'pending':
-        return { icon: <Clock className="w-5 h-5" />, color: 'bg-yellow-100 text-yellow-800 border-yellow-300', label: 'PENDING' };
-      case 'correct':
+      case 'active':
+        return { icon: <Clock className="w-5 h-5" />, color: 'bg-yellow-100 text-yellow-800 border-yellow-300', label: 'ACTIVE' };
+      case 'verified_correct':
         return { icon: <Check className="w-5 h-5" />, color: 'bg-green-100 text-green-800 border-green-300', label: 'CORRECT' };
-      case 'wrong':
+      case 'verified_wrong':
         return { icon: <X className="w-5 h-5" />, color: 'bg-red-100 text-red-800 border-red-300', label: 'WRONG' };
       case 'expired':
         return { icon: <Clock className="w-5 h-5" />, color: 'bg-gray-100 text-gray-600 border-gray-300', label: 'EXPIRED' };
@@ -100,12 +100,12 @@ export default function SignalDetail({ signal, onClose }) {
               {statusConfig.icon}
               {statusConfig.label}
             </span>
-            {status === 'pending' && daysLeft !== null && (
+            {status === 'active' && daysLeft !== null && (
               <span className="text-sm text-gray-500">
                 {daysLeft > 0 ? `Expires in ${daysLeft} days` : 'Expired'}
               </span>
             )}
-            {status !== 'pending' && verified_at && (
+            {status !== 'active' && verified_at && (
               <span className="text-sm text-gray-500">
                 Verified: {formatDate(verified_at, 'MMM d, yyyy')}
               </span>
@@ -158,8 +158,8 @@ export default function SignalDetail({ signal, onClose }) {
             </div>
           </div>
 
-          {/* Current vs Target Progress (for pending) */}
-          {status === 'pending' && current_value && (
+          {/* Current vs Target Progress (for active) */}
+          {status === 'active' && current_value && (
             <div className="p-4 bg-blue-50 rounded-lg">
               <h4 className="text-sm font-medium text-blue-800 mb-3">Current Progress</h4>
               <div className="flex items-center justify-between text-sm mb-2">
@@ -173,9 +173,9 @@ export default function SignalDetail({ signal, onClose }) {
           )}
 
           {/* Result (for verified) */}
-          {(status === 'correct' || status === 'wrong') && (
-            <div className={`p-4 rounded-lg ${status === 'correct' ? 'bg-green-50' : 'bg-red-50'}`}>
-              <h4 className={`text-sm font-medium mb-3 ${status === 'correct' ? 'text-green-800' : 'text-red-800'}`}>
+          {(status === 'verified_correct' || status === 'verified_wrong') && (
+            <div className={`p-4 rounded-lg ${status === 'verified_correct' ? 'bg-green-50' : 'bg-red-50'}`}>
+              <h4 className={`text-sm font-medium mb-3 ${status === 'verified_correct' ? 'text-green-800' : 'text-red-800'}`}>
                 Verification Result
               </h4>
               <div className="grid md:grid-cols-3 gap-4 text-sm">
@@ -188,8 +188,8 @@ export default function SignalDetail({ signal, onClose }) {
                   <span className="ml-2 font-medium">{formatNumber(actual_value)}</span>
                 </div>
                 <div>
-                  <span className={`font-medium ${status === 'correct' ? 'text-green-700' : 'text-red-700'}`}>
-                    {status === 'correct' ? '✓ Within range' : '✗ Outside range'}
+                  <span className={`font-medium ${status === 'verified_correct' ? 'text-green-700' : 'text-red-700'}`}>
+                    {status === 'verified_correct' ? '✓ Within range' : '✗ Outside range'}
                   </span>
                 </div>
               </div>

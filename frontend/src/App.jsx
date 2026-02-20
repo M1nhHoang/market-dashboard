@@ -205,9 +205,9 @@ function App() {
               }`}
             >
               📡 Signals
-              {signalsData?.signals?.filter(s => s.status === 'pending').length > 0 && (
+              {signalsData?.signals?.filter(s => s.status === 'active').length > 0 && (
                 <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-purple-100 text-purple-700 rounded-full">
-                  {signalsData.signals.filter(s => s.status === 'pending').length}
+                  {signalsData.signals.filter(s => s.status === 'active').length}
                 </span>
               )}
             </button>
@@ -220,9 +220,9 @@ function App() {
               }`}
             >
               🔥 Themes
-              {themesData?.themes?.filter(t => t.status === 'active').length > 0 && (
+              {themesData?.themes?.filter(t => t.status === 'active' || t.status === 'emerging').length > 0 && (
                 <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-orange-100 text-orange-700 rounded-full">
-                  {themesData.themes.filter(t => t.status === 'active').length}
+                  {themesData.themes.filter(t => t.status === 'active' || t.status === 'emerging').length}
                 </span>
               )}
             </button>
@@ -306,7 +306,7 @@ function App() {
                     <Flame className="w-4 h-4 text-orange-500" />
                     Active Themes
                   </h3>
-                  {themesData?.themes?.filter(t => t.status === 'active').slice(0, 3).map(theme => (
+                  {themesData?.themes?.filter(t => t.status === 'active' || t.status === 'emerging').slice(0, 3).map(theme => (
                     <div
                       key={theme.id}
                       onClick={() => { setActiveTab('themes'); themeModal.open(theme); }}
@@ -327,7 +327,7 @@ function App() {
                     <Radio className="w-4 h-4 text-purple-500" />
                     Active Signals
                   </h3>
-                  {signalsData?.signals?.filter(s => s.status === 'pending').slice(0, 3).map(signal => (
+                  {signalsData?.signals?.filter(s => s.status === 'active').slice(0, 3).map(signal => (
                     <div
                       key={signal.id}
                       onClick={() => { setActiveTab('signals'); signalModal.open(signal); }}
@@ -388,7 +388,7 @@ function App() {
                   <Flame className="w-4 h-4 text-orange-500" />
                   Themes
                 </h3>
-                {themesData?.themes?.filter(t => t.status === 'active' || t.strength >= 5).slice(0, 3).map(theme => (
+                {themesData?.themes?.filter(t => t.status === 'active' || t.status === 'emerging' || t.strength >= 5).slice(0, 3).map(theme => (
                   <div
                     key={theme.id}
                     onClick={() => { setActiveTab('themes'); themeModal.open(theme); }}
@@ -401,7 +401,7 @@ function App() {
                     <div className="text-xs text-gray-500 mt-1">Strength: {theme.strength?.toFixed(1)}</div>
                   </div>
                 ))}
-                {(!themesData?.themes || themesData.themes.filter(t => t.status === 'active' || t.strength >= 5).length === 0) && (
+                {(!themesData?.themes || themesData.themes.filter(t => t.status === 'active' || t.status === 'emerging' || t.strength >= 5).length === 0) && (
                   <div className="text-sm text-gray-400 py-2">No active themes</div>
                 )}
               </div>
@@ -412,7 +412,7 @@ function App() {
                   <Radio className="w-4 h-4 text-purple-500" />
                   Signals
                 </h3>
-                {signalsData?.signals?.filter(s => s.status === 'pending').slice(0, 3).map(signal => (
+                {signalsData?.signals?.filter(s => s.status === 'active').slice(0, 3).map(signal => (
                   <div
                     key={signal.id}
                     onClick={() => { setActiveTab('signals'); signalModal.open(signal); }}
@@ -424,7 +424,7 @@ function App() {
                     </div>
                   </div>
                 ))}
-                {(!signalsData?.signals || signalsData.signals.filter(s => s.status === 'pending').length === 0) && (
+                {(!signalsData?.signals || signalsData.signals.filter(s => s.status === 'active').length === 0) && (
                   <div className="text-sm text-gray-400 py-2">No active signals</div>
                 )}
               </div>
@@ -443,9 +443,9 @@ function App() {
                 <span>•</span>
                 <span>Events: {latestRun.run.events_extracted || 0}</span>
                 <span>•</span>
-                <span>Signals: {signalsData?.signals?.filter(s => s.status === 'pending').length || 0}</span>
+                <span>Signals: {signalsData?.signals?.filter(s => s.status === 'active').length || 0}</span>
                 <span>•</span>
-                <span>Themes: {themesData?.themes?.filter(t => t.status === 'active').length || 0}</span>
+                <span>Themes: {themesData?.themes?.filter(t => t.status === 'active' || t.status === 'emerging').length || 0}</span>
               </>
             )}
           </div>

@@ -29,11 +29,11 @@ function SignalCard({ signal, onClick }) {
 
   const getStatusConfig = () => {
     switch (status?.toLowerCase()) {
-      case 'pending':
-        return { icon: <Clock className="w-4 h-4" />, color: 'bg-yellow-100 text-yellow-800', label: 'PENDING' };
-      case 'correct':
+      case 'active':
+        return { icon: <Clock className="w-4 h-4" />, color: 'bg-yellow-100 text-yellow-800', label: 'ACTIVE' };
+      case 'verified_correct':
         return { icon: <Check className="w-4 h-4" />, color: 'bg-green-100 text-green-800', label: 'CORRECT' };
-      case 'wrong':
+      case 'verified_wrong':
         return { icon: <X className="w-4 h-4" />, color: 'bg-red-100 text-red-800', label: 'WRONG' };
       case 'expired':
         return { icon: <Clock className="w-4 h-4" />, color: 'bg-gray-100 text-gray-600', label: 'EXPIRED' };
@@ -87,12 +87,12 @@ function SignalCard({ signal, onClick }) {
           {statusConfig.icon}
           {statusConfig.label}
         </span>
-        {status === 'pending' && daysLeft !== null && (
+        {status === 'active' && daysLeft !== null && (
           <span className="text-xs text-gray-500">
             Expires: {daysLeft} {daysLeft === 1 ? 'day' : 'days'}
           </span>
         )}
-        {status !== 'pending' && verified_at && (
+        {status !== 'active' && verified_at && (
           <span className="text-xs text-gray-500">
             Verified: {formatDate(verified_at, 'MMM d')}
           </span>
@@ -131,8 +131,8 @@ function SignalCard({ signal, onClick }) {
           </span>
         </div>
 
-        {/* Progress Bar for Pending Signals */}
-        {status === 'pending' && current_value && target_range && (
+        {/* Progress Bar for Active Signals */}
+        {status === 'active' && current_value && target_range && (
           <div className="mb-4 p-3 bg-gray-50 rounded-lg">
             <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
               <span>Current: {formatNumber(current_value)}</span>
@@ -294,8 +294,8 @@ export default function SignalPanel({
   });
 
   // Separate active and verified signals
-  const activeSignals = filteredSignals.filter(s => s.status?.toLowerCase() === 'pending');
-  const verifiedSignals = filteredSignals.filter(s => ['correct', 'wrong'].includes(s.status?.toLowerCase()));
+  const activeSignals = filteredSignals.filter(s => s.status?.toLowerCase() === 'active');
+  const verifiedSignals = filteredSignals.filter(s => ['verified_correct', 'verified_wrong', 'expired'].includes(s.status?.toLowerCase()));
 
   // Calculate overall accuracy
   const totalVerified = signals.filter(s => ['correct', 'wrong'].includes(s.status?.toLowerCase())).length;
@@ -348,9 +348,9 @@ export default function SignalPanel({
                 className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
               >
                 <option value="all">All</option>
-                <option value="pending">Pending</option>
-                <option value="correct">Correct</option>
-                <option value="wrong">Wrong</option>
+                <option value="active">Active</option>
+                <option value="verified_correct">Correct</option>
+                <option value="verified_wrong">Wrong</option>
                 <option value="expired">Expired</option>
               </select>
             </div>

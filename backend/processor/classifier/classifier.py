@@ -29,6 +29,15 @@ class Classifier:
     This layer runs on all raw news before scoring.
     
     Uses LLMClient interface (GLM by default).
+    
+    TODO: Implement batch classification to reduce LLM API calls
+    Current: 73 events × 1 call = 73 calls (~4-6 mins best case, >1hr worst case)
+    Target: Batch by token count (~15-20K tokens/batch), keep full content
+    Approach:
+    - Group items by estimated token count (not fixed item count)
+    - Use JSON format with unique IDs for accurate result mapping
+    - On batch failure: binary split and retry (not fallback to individual)
+    - Preserve full content for accuracy (no truncation)
     """
     
     def __init__(

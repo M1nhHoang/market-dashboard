@@ -51,14 +51,9 @@ services:
         condition: service_healthy
     networks:
       - mi-network
-    # Override healthcheck - scheduler has no HTTP server
-    # Use 'ps aux | grep' since pgrep is not available in python:slim
+    # Disable healthcheck - scheduler has no HTTP server, monitor via logs instead
     healthcheck:
-      test: ["CMD-SHELL", "ps aux | grep -v grep | grep scheduler.py"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+      disable: true
 
   # --- React Frontend (Nginx) ---
   frontend:
