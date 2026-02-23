@@ -5,12 +5,18 @@ Endpoints organized by:
 - Health Check
 - Indicators (current values and history)
 - Events (key events, other news, archive)
-- Signals (predictions with targets)
-- Themes (narrative groupings)
+- Signals (predictions with targets) - LEGACY, use /trends for dashboard
+- Themes (narrative groupings) - LEGACY, use /trends for dashboard
+- Trends (UNIFIED: Themes + Signals combined view) - NEW
 - Watchlist (user-defined alerts)
 - Topics (hot topics)
 - Calendar (economic events)
 - System (runs, refresh)
+
+## TREND SYSTEM (migration 005_trends_system)
+The /trends endpoints provide a unified view combining themes and signals.
+Frontend should use /trends for the main dashboard, while /themes and /signals
+remain available for backward compatibility.
 """
 import json
 from datetime import datetime, date, timedelta
@@ -373,7 +379,9 @@ async def get_causal_analysis(event_id: str):
 
 
 # ============================================================
-# Signals
+# Signals (LEGACY endpoints - prefer /trends for dashboard)
+# Kept for: SignalDetail modal, direct signal access, debugging
+# TODO: Consider removing after frontend fully migrated to /trends
 # ============================================================
 @router.get("/signals")
 async def list_signals(
@@ -477,7 +485,9 @@ async def get_signal_accuracy():
 
 
 # ============================================================
-# Themes
+# Themes (LEGACY endpoints - prefer /trends for dashboard)
+# Kept for: backward compatibility, direct theme access, debugging
+# TODO: Consider removing after frontend fully migrated to /trends
 # ============================================================
 @router.get("/themes")
 async def list_themes(
@@ -548,6 +558,382 @@ async def get_theme(theme_id: str):
     
     conn.close()
     return result
+
+
+# ============================================================
+# Trends (Unified view: Themes + Signals)
+# ============================================================
+# NEW ENDPOINT: Replaces separate /themes and /signals for dashboard
+# Frontend: TrendsPanel uses this as main data source
+# Concept: Each "Trend" is a Theme with computed signal stats
+# ============================================================
+
+@router.get("/trends")
+async def list_trends(
+    urgency: Optional[str] = Query(default=None, description="urgent, watching, low"),
+    with_summary: bool = Query(default=True, description="Include summary stats"),
+    include_fading: bool = Query(default=False, description="Include fading trends"),
+    limit: int = Query(default=30, description="Max results to return")
+):
+    """
+    List trends for dashboard - unified Themes + Signals view.
+    
+    ## What is a Trend?
+    A Trend = Theme (narrative) + Signals (predictions) + Events (evidence)
+    
+    ## Urgency levels:
+    - urgent: Has signals expiring in < 7 days
+    - watching: Has signals expiring in 7-14 days  
+    - low: Has signals expiring in > 14 days
+    - null: No active signals
+    
+    ## UI Usage:
+    - TrendsPanel.jsx main dashboard
+    - Sidebar "Active Trends" section
+    
+    ## Returns:
+    - trends: Array of theme objects with signals loaded
+    - summary: (if with_summary=true) Overall stats
+    """
+    conn = get_connection(settings.DATABASE_PATH)
+    
+    # Build query based on urgency filter
+    if urgency:
+        cursor = conn.execute(
+            """SELECT t.*, 
+                      (SELECT COUNT(*) FROM signals s WHERE s.theme_id = t.id AND s.status = 'active') as active_signals_count
+               FROM themes t
+               WHERE t.urgency = ?
+               AND t.status IN ('active', 'emerging')
+               ORDER BY t.earliest_signal_expires ASC
+               LIMIT ?""",
+            (urgency, limit)
+        )
+    else:
+        # Default: all active/emerging, ordered by urgency then strength
+        status_filter = "('active', 'emerging', 'fading')" if include_fading else "('active', 'emerging')"
+        cursor = conn.execute(
+            f"""SELECT t.*,
+                       (SELECT COUNT(*) FROM signals s WHERE s.theme_id = t.id AND s.status = 'active') as active_signals_count
+                FROM themes t
+                WHERE t.status IN {status_filter}
+                ORDER BY 
+                    CASE t.urgency 
+                        WHEN 'urgent' THEN 1 
+                        WHEN 'watching' THEN 2 
+                        WHEN 'low' THEN 3 
+                        ELSE 4 
+                    END,
+                    t.earliest_signal_expires ASC,
+                    t.strength DESC
+                LIMIT ?""",
+            (limit,)
+        )
+    
+    trends_raw = [dict(row) for row in cursor.fetchall()]
+    
+    # Enrich each trend with its signals
+    trends = []
+    for trend in trends_raw:
+        # Parse JSON fields
+        for field in ['related_event_ids', 'related_signal_ids', 'related_indicators']:
+            if trend.get(field):
+                try:
+                    trend[field] = json.loads(trend[field])
+                except:
+                    pass
+        
+        # Get signals for this trend
+        cursor = conn.execute(
+            """SELECT * FROM signals 
+               WHERE theme_id = ?
+               ORDER BY 
+                   CASE status WHEN 'active' THEN 1 ELSE 2 END,
+                   expires_at ASC""",
+            (trend['id'],)
+        )
+        trend['signals'] = [dict(s) for s in cursor.fetchall()]
+        
+        # Get related events (limited)
+        if trend.get('related_event_ids'):
+            event_ids = trend['related_event_ids'][:5]  # Limit to 5
+            placeholders = ','.join(['?' for _ in event_ids])
+            cursor = conn.execute(
+                f"""SELECT id, title, source, published_at, current_score 
+                    FROM events 
+                    WHERE id IN ({placeholders})
+                    ORDER BY published_at DESC""",
+                event_ids
+            )
+            trend['events'] = [dict(e) for e in cursor.fetchall()]
+        else:
+            trend['events'] = []
+        
+        trends.append(trend)
+    
+    result = {"trends": trends}
+    
+    # Add summary stats if requested
+    if with_summary:
+        cursor = conn.execute(
+            """SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN urgency = 'urgent' THEN 1 ELSE 0 END) as urgent_count,
+                SUM(CASE WHEN urgency = 'watching' THEN 1 ELSE 0 END) as watching_count,
+                SUM(CASE WHEN signals_count > 0 THEN 1 ELSE 0 END) as with_signals_count
+               FROM themes
+               WHERE status IN ('active', 'emerging')"""
+        )
+        counts = dict(cursor.fetchone())
+        
+        # Get overall signal accuracy
+        cursor = conn.execute(
+            """SELECT 
+                SUM(CASE WHEN status = 'verified_correct' THEN 1 ELSE 0 END) as correct,
+                COUNT(*) as total
+               FROM signals
+               WHERE status IN ('verified_correct', 'verified_wrong')"""
+        )
+        acc = dict(cursor.fetchone())
+        
+        accuracy_pct = None
+        if acc['total'] and acc['total'] > 0:
+            accuracy_pct = round((acc['correct'] or 0) / acc['total'] * 100, 1)
+        
+        result['summary'] = {
+            **counts,
+            'signals_correct': acc['correct'] or 0,
+            'signals_total_verified': acc['total'] or 0,
+            'signals_accuracy': accuracy_pct,
+        }
+    
+    conn.close()
+    return result
+
+
+# ============================================================
+# IMPORTANT: Static routes MUST come BEFORE dynamic routes
+# FastAPI matches routes in order of declaration
+# /trends/urgent/sidebar must be BEFORE /trends/{trend_id}
+# ============================================================
+
+@router.get("/trends/urgent/sidebar")
+async def get_urgent_trends_sidebar():
+    """
+    Get urgent trends for sidebar quick view.
+    
+    ## UI Usage:
+    - Vietnam/Global tab sidebar "Active Trends" section
+    - Limited data, optimized for small display
+    
+    ## Returns:
+    - urgent: Array of urgent trends (max 3)
+    - watching: Array of watching trends (max 2)
+    """
+    conn = get_connection(settings.DATABASE_PATH)
+    
+    # Get urgent
+    cursor = conn.execute(
+        """SELECT id, name, name_vi, urgency, signals_count, earliest_signal_expires
+           FROM themes
+           WHERE urgency = 'urgent' AND status IN ('active', 'emerging')
+           ORDER BY earliest_signal_expires ASC
+           LIMIT 3"""
+    )
+    urgent = [dict(row) for row in cursor.fetchall()]
+    
+    # Get watching
+    cursor = conn.execute(
+        """SELECT id, name, name_vi, urgency, signals_count, earliest_signal_expires
+           FROM themes
+           WHERE urgency = 'watching' AND status IN ('active', 'emerging')
+           ORDER BY earliest_signal_expires ASC
+           LIMIT 2"""
+    )
+    watching = [dict(row) for row in cursor.fetchall()]
+    
+    conn.close()
+    return {"urgent": urgent, "watching": watching}
+
+
+@router.get("/trends/summary")
+async def get_trends_summary():
+    """
+    Get summary stats for trends dashboard header.
+    
+    ## UI Usage:
+    - TrendsPanel header stats bar
+    """
+    conn = get_connection(settings.DATABASE_PATH)
+    
+    cursor = conn.execute(
+        """SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN urgency = 'urgent' THEN 1 ELSE 0 END) as urgent_count,
+            SUM(CASE WHEN urgency = 'watching' THEN 1 ELSE 0 END) as watching_count,
+            SUM(CASE WHEN signals_count > 0 THEN 1 ELSE 0 END) as with_signals_count
+           FROM themes
+           WHERE status IN ('active', 'emerging')"""
+    )
+    counts = dict(cursor.fetchone())
+    
+    cursor = conn.execute(
+        """SELECT 
+            SUM(CASE WHEN status = 'verified_correct' THEN 1 ELSE 0 END) as correct,
+            COUNT(*) as total
+           FROM signals
+           WHERE status IN ('verified_correct', 'verified_wrong')"""
+    )
+    acc = dict(cursor.fetchone())
+    
+    accuracy_pct = None
+    if acc['total'] and acc['total'] > 0:
+        accuracy_pct = round((acc['correct'] or 0) / acc['total'] * 100, 1)
+    
+    conn.close()
+    return {
+        **counts,
+        'signals_correct': acc['correct'] or 0,
+        'signals_total_verified': acc['total'] or 0,
+        'signals_accuracy': accuracy_pct,
+    }
+
+
+# ============================================================
+# Dynamic route - MUST come AFTER all static /trends/* routes
+# ============================================================
+
+@router.get("/trends/{trend_id}")
+async def get_trend(trend_id: str):
+    """
+    Get single trend with full details.
+    
+    ## UI Usage:
+    - TrendDetail modal/page
+    - Shows full narrative, all signals, all events
+    
+    ## Returns:
+    - Full theme object with all signals and events
+    """
+    conn = get_connection(settings.DATABASE_PATH)
+    
+    cursor = conn.execute(
+        "SELECT * FROM themes WHERE id = ?",
+        (trend_id,)
+    )
+    theme = cursor.fetchone()
+    
+    if not theme:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Trend not found")
+    
+    result = dict(theme)
+    
+    # Parse JSON fields
+    for field in ['related_event_ids', 'related_signal_ids', 'related_indicators']:
+        if result.get(field):
+            try:
+                result[field] = json.loads(result[field])
+            except:
+                pass
+    
+    # Get ALL signals (including verified)
+    cursor = conn.execute(
+        """SELECT s.*, e.title as source_event_title
+           FROM signals s
+           LEFT JOIN events e ON s.source_event_id = e.id
+           WHERE s.theme_id = ?
+           ORDER BY 
+               CASE s.status WHEN 'active' THEN 1 ELSE 2 END,
+               s.expires_at ASC""",
+        (trend_id,)
+    )
+    result['signals'] = [dict(s) for s in cursor.fetchall()]
+    
+    # Separate active and verified signals for UI
+    result['active_signals'] = [s for s in result['signals'] if s['status'] == 'active']
+    result['verified_signals'] = [s for s in result['signals'] if s['status'] in ['verified_correct', 'verified_wrong']]
+    
+    # Get ALL related events
+    if result.get('related_event_ids'):
+        event_ids = result['related_event_ids']
+        placeholders = ','.join(['?' for _ in event_ids])
+        cursor = conn.execute(
+            f"""SELECT * FROM events 
+                WHERE id IN ({placeholders})
+                ORDER BY published_at DESC""",
+            event_ids
+        )
+        result['events'] = [dict(e) for e in cursor.fetchall()]
+    else:
+        result['events'] = []
+    
+    # Get related indicator values
+    if result.get('related_indicators'):
+        ind_ids = result['related_indicators']
+        placeholders = ','.join(['?' for _ in ind_ids])
+        cursor = conn.execute(
+            f"""SELECT id, name, name_vi, value, change, change_pct, trend, updated_at
+                FROM indicators
+                WHERE id IN ({placeholders})""",
+            ind_ids
+        )
+        result['indicators'] = [dict(i) for i in cursor.fetchall()]
+    else:
+        result['indicators'] = []
+    
+    conn.close()
+    return result
+
+
+@router.post("/trends/{trend_id}/archive")
+async def archive_trend(trend_id: str):
+    """
+    Archive a trend (set status to 'archived').
+    
+    ## UI Usage:
+    - TrendDetail "Archive" button
+    - Removes from active dashboard but keeps history
+    """
+    conn = get_connection(settings.DATABASE_PATH)
+    
+    cursor = conn.execute(
+        "UPDATE themes SET status = 'archived', updated_at = datetime('now') WHERE id = ?",
+        (trend_id,)
+    )
+    
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Trend not found")
+    
+    conn.commit()
+    conn.close()
+    return {"success": True, "message": f"Trend {trend_id} archived"}
+
+
+@router.post("/trends/{trend_id}/dismiss")
+async def dismiss_trend(trend_id: str):
+    """
+    Dismiss a trend (set status to 'fading').
+    
+    ## UI Usage:
+    - TrendDetail "Dismiss" button
+    - Moves to fading section, will auto-archive eventually
+    """
+    conn = get_connection(settings.DATABASE_PATH)
+    
+    cursor = conn.execute(
+        "UPDATE themes SET status = 'fading', urgency = NULL, updated_at = datetime('now') WHERE id = ?",
+        (trend_id,)
+    )
+    
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Trend not found")
+    
+    conn.commit()
+    conn.close()
+    return {"success": True, "message": f"Trend {trend_id} dismissed"}
 
 
 # ============================================================

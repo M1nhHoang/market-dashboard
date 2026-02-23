@@ -69,6 +69,16 @@ class Signal(Base, TimestampMixin):
         index=True
     )
     
+    # ==========================================================
+    # TREND SYSTEM FIELDS (added by migration 005_trends_system)
+    # ==========================================================
+    
+    # Signal type for different UI treatment:
+    # - 'quantitative': Has target_range (shows "9.12% → 9.5-10%")
+    # - 'directional': Only direction, no target (shows "↑ UP")
+    # - 'event': Predicts event occurrence (shows "Expected: ...")
+    signal_type: Mapped[Optional[str]] = mapped_column(String(20), default='directional')
+    
     # Indexes
     __table_args__ = (
         Index('idx_signals_status_expires', 'status', 'expires_at'),

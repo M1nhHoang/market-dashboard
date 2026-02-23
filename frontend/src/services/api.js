@@ -67,29 +67,82 @@ export const getTodayEvents = () => fetchAPI('/events/today');
 export const getEvent = (id) => fetchAPI(`/events/${id}`);
 
 // ============================================================
-// Signals
+// Signals (LEGACY - Use /trends for dashboard)
+// Kept for SignalDetail modal and direct signal access
 // ============================================================
+/** @deprecated Use getTrends() for dashboard views instead */
 export const getSignals = (params = {}) => {
   const query = new URLSearchParams(params).toString();
   return fetchAPI(`/signals${query ? `?${query}` : ''}`);
 };
 
+/** Used by: SignalDetail modal when viewing individual signal */
 export const getSignal = (id) => fetchAPI(`/signals/${id}`);
 
+/** @deprecated Signal accuracy is now included in getTrends summary */
 export const getSignalAccuracy = () => fetchAPI('/signals/accuracy');
 
 // ============================================================
-// Themes
+// Themes (LEGACY - Use /trends for dashboard)
+// Kept for backward compatibility, prefer /trends endpoints
 // ============================================================
+/** @deprecated Use getTrends() for dashboard views instead */
 export const getThemes = (params = {}) => {
   const query = new URLSearchParams(params).toString();
   return fetchAPI(`/themes${query ? `?${query}` : ''}`);
 };
 
+/** @deprecated Use getTrend() instead */
 export const getTheme = (id) => fetchAPI(`/themes/${id}`);
 
+/** @deprecated Use archiveTrend() instead */
 export const archiveTheme = (id) => 
   fetchAPI(`/themes/${id}/archive`, { method: 'POST' });
+
+// ============================================================
+// Trends (Unified: Themes + Signals)
+// ============================================================
+// NEW: Primary endpoint for dashboard - replaces separate themes/signals
+
+/**
+ * Get all trends for dashboard
+ * Used by: TrendsPanel component
+ * @param {Object} params - Query params
+ * @param {string} params.urgency - Filter by urgency: 'urgent', 'watching', 'low'
+ * @param {boolean} params.with_summary - Include summary stats (default: true)
+ * @param {boolean} params.include_fading - Include fading trends (default: false)
+ * @param {number} params.limit - Max results (default: 30)
+ */
+export const getTrends = (params = {}) => {
+  const query = new URLSearchParams(params).toString();
+  return fetchAPI(`/trends${query ? `?${query}` : ''}`);
+};
+
+/**
+ * Get single trend with full details
+ * Used by: TrendDetail modal/component
+ */
+export const getTrend = (id) => fetchAPI(`/trends/${id}`);
+
+/**
+ * Get urgent trends for sidebar
+ * Used by: Vietnam/Global tab sidebar "Active Trends" section
+ */
+export const getUrgentTrendsSidebar = () => fetchAPI('/trends/urgent/sidebar');
+
+/**
+ * Archive a trend (removes from active dashboard)
+ * Used by: TrendDetail "Archive" button
+ */
+export const archiveTrend = (id) => 
+  fetchAPI(`/trends/${id}/archive`, { method: 'POST' });
+
+/**
+ * Dismiss a trend (moves to fading section)
+ * Used by: TrendDetail "Dismiss" button  
+ */
+export const dismissTrend = (id) => 
+  fetchAPI(`/trends/${id}/dismiss`, { method: 'POST' });
 
 // ============================================================
 // Watchlist
@@ -161,6 +214,13 @@ export default {
   getThemes,
   getTheme,
   archiveTheme,
+  // Trends (unified: Themes + Signals)
+  getTrends,
+  getTrend,
+  getUrgentTrendsSidebar,
+  archiveTrend,
+  dismissTrend,
+  // Watchlist
   getWatchlist,
   getWatchlistItem,
   createWatchlistItem,

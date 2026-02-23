@@ -205,9 +205,10 @@ class LLMClient(ABC):
         temperature: float,
     ) -> None:
         """
-        Log an LLM call. Stores in pending queue for batch save.
+        Log an LLM call directly to database.
         
-        Call flush_logs() or flush_logs_async() to persist to database.
+        Saves the call record immediately using a background thread
+        to avoid blocking the sync caller.
         """
         if not self.enable_logging:
             return
@@ -219,8 +220,62 @@ class LLMClient(ABC):
             max_tokens=max_tokens,
             temperature=temperature,
         )
-        self._pending_logs.append(record)
         logger.debug(f"LLM call logged: {record.id} ({record.task_type or 'unknown'})")
+        
+        # Save directly to database in a background thread
+        self._save_record_to_db(record)
+    
+    def _save_record_to_db(self, record: LLMCallRecord) -> None:
+        """
+        Save a single LLM call record to database.
+        
+        Uses asyncio to run the async DB save. Handles the case where
+        we may or may not be inside an existing event loop.
+        """
+        import threading
+        
+        async def _do_save():
+            from database.session import get_session
+            from database.models import LLMCallHistory
+            
+            try:
+                async with get_session() as session:
+                    db_record = LLMCallHistory(
+                        id=record.id,
+                        timestamp=record.timestamp,
+                        model=record.model,
+                        system_prompt=record.system_prompt,
+                        user_prompt=record.user_prompt,
+                        messages=record.messages,
+                        response=record.response,
+                        input_tokens=record.input_tokens,
+                        output_tokens=record.output_tokens,
+                        total_tokens=record.total_tokens,
+                        temperature=record.temperature,
+                        max_tokens=record.max_tokens,
+                        latency_ms=record.latency_ms,
+                        stop_reason=record.stop_reason,
+                        task_type=record.task_type,
+                        run_id=record.run_id,
+                        is_valid_json=record.is_valid_json,
+                    )
+                    session.add(db_record)
+                    await session.commit()
+                    logger.debug(f"Saved LLM call log: {record.id}")
+            except Exception as e:
+                logger.error(f"Failed to save LLM call log {record.id}: {e}")
+        
+        # Run async save: use existing loop if available, otherwise create new one in thread
+        try:
+            loop = asyncio.get_running_loop()
+            # We're inside an async context - schedule as a task
+            loop.create_task(_do_save())
+        except RuntimeError:
+            # No running loop - run in a new thread with its own loop
+            def _run():
+                asyncio.run(_do_save())
+            thread = threading.Thread(target=_run, daemon=True)
+            thread.start()
     
     def get_pending_logs(self) -> List[LLMCallRecord]:
         """Get pending log records."""

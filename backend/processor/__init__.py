@@ -21,6 +21,7 @@ from .ranker import (
 from .context_builder import ContextBuilder
 from .output_parser import OutputParser, ParsedAnalysis
 from .pipeline import Pipeline
+from .narrative_synthesizer import NarrativeSynthesizer
 
 __all__ = [
     # Pipeline
@@ -43,4 +44,6 @@ __all__ = [
     "ContextBuilder",
     "OutputParser",
     "ParsedAnalysis",
+    # Narrative
+    "NarrativeSynthesizer",
 ]

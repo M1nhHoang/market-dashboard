@@ -2,11 +2,19 @@
 Theme Repository
 
 Handles all database operations for themes.
+
+## TREND SYSTEM (migration 005)
+This repository now includes methods for the unified "Trends" view:
+- get_trends_summary(): Dashboard stats
+- get_trends_with_signals(): Main trends query with ordering by urgency
+- get_by_urgency(): Filter by urgency level
+- recompute_trend_stats(): Update computed fields when signals change
+- update_narrative(): Set AI-generated narrative
 """
 from datetime import timedelta
 from typing import Optional, List, Sequence
 
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, Integer
 from sqlalchemy.orm import selectinload
 
 from database.models import Theme
@@ -226,3 +234,215 @@ class ThemeRepository(BaseRepository[Theme]):
     async def archive(self, theme_id: str) -> Optional[Theme]:
         """Archive a theme."""
         return await self.update_strength(theme_id, strength=0.0, status="archived")
+    
+    # ============================================
+    # TREND SYSTEM METHODS
+    # Added for unified Trends view (combines themes + signals)
+    # ============================================
+    
+    async def get_trends_summary(self) -> dict:
+        """
+        Get summary statistics for Trends dashboard.
+        
+        Used by: GET /api/trends (with_summary=true)
+        Returns: {total, urgent_count, watching_count, with_signals_count, signals_accuracy, ...}
+        """
+        from sqlalchemy import func, and_
+        from database.models import Signal
+        
+        # Count themes by urgency
+        stmt_counts = select(
+            func.count(Theme.id).label('total'),
+            func.sum(func.cast(Theme.urgency == 'urgent', Integer)).label('urgent_count'),
+            func.sum(func.cast(Theme.urgency == 'watching', Integer)).label('watching_count'),
+            func.sum(func.cast(Theme.signals_count > 0, Integer)).label('with_signals_count'),
+        ).where(Theme.status.in_(['active', 'emerging']))
+        
+        result = await self.session.execute(stmt_counts)
+        counts = result.one()
+        
+        # Get overall signal accuracy
+        stmt_accuracy = select(
+            func.sum(Signal.status == 'verified_correct').label('correct'),
+            func.count(Signal.id).label('verified_total')
+        ).where(Signal.status.in_(['verified_correct', 'verified_wrong']))
+        
+        result_acc = await self.session.execute(stmt_accuracy)
+        acc = result_acc.one()
+        
+        accuracy_pct = None
+        if acc.verified_total and acc.verified_total > 0:
+            accuracy_pct = round((acc.correct or 0) / acc.verified_total * 100, 1)
+        
+        return {
+            'total': counts.total or 0,
+            'urgent_count': counts.urgent_count or 0,
+            'watching_count': counts.watching_count or 0,
+            'with_signals_count': counts.with_signals_count or 0,
+            'signals_correct': acc.correct or 0,
+            'signals_total_verified': acc.verified_total or 0,
+            'signals_accuracy': accuracy_pct,
+        }
+    
+    async def get_by_urgency(
+        self, 
+        urgency: str, 
+        limit: int = 20
+    ) -> Sequence[Theme]:
+        """
+        Get themes by urgency level.
+        
+        Used by: GET /api/trends?urgency=urgent
+        urgency: 'urgent', 'watching', or 'low'
+        """
+        stmt = (
+            select(Theme)
+            .where(Theme.urgency == urgency)
+            .where(Theme.status.in_(['active', 'emerging']))
+            .order_by(Theme.earliest_signal_expires.asc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().all()
+    
+    async def get_trends_with_signals(
+        self, 
+        limit: int = 30,
+        include_fading: bool = False
+    ) -> Sequence[Theme]:
+        """
+        Get themes ordered for Trends dashboard.
+        
+        Used by: GET /api/trends (main endpoint)
+        Order: urgent first (by expiry), then watching, then by strength
+        """
+        from sqlalchemy import case
+        
+        statuses = ['active', 'emerging']
+        if include_fading:
+            statuses.append('fading')
+        
+        # Order: urgent (asc by expiry) > watching > low > no urgency > by strength
+        urgency_order = case(
+            (Theme.urgency == 'urgent', 1),
+            (Theme.urgency == 'watching', 2),
+            (Theme.urgency == 'low', 3),
+            else_=4
+        )
+        
+        stmt = (
+            select(Theme)
+            .options(selectinload(Theme.signals))
+            .where(Theme.status.in_(statuses))
+            .order_by(
+                urgency_order,
+                Theme.earliest_signal_expires.asc().nullslast(),
+                desc(Theme.strength)
+            )
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().all()
+    
+    async def recompute_trend_stats(self, theme_id: str) -> Optional[Theme]:
+        """
+        Recompute all trend statistics for a theme.
+        
+        Called when:
+        - Signal is added to theme
+        - Signal is verified (correct/wrong)
+        - Signal expires
+        
+        Updates: urgency, earliest_signal_expires, signals_count, signals_accuracy
+        """
+        from sqlalchemy import func, and_
+        from database.models import Signal
+        from datetime import timedelta
+        
+        theme = await self.get(theme_id)
+        if not theme:
+            return None
+        
+        now = self.now()
+        
+        # Count active signals
+        stmt_count = select(func.count(Signal.id)).where(
+            and_(
+                Signal.theme_id == theme_id,
+                Signal.status == 'active'
+            )
+        )
+        result = await self.session.execute(stmt_count)
+        signals_count = result.scalar() or 0
+        
+        # Get earliest expiry
+        stmt_expiry = select(func.min(Signal.expires_at)).where(
+            and_(
+                Signal.theme_id == theme_id,
+                Signal.status == 'active',
+                Signal.expires_at.isnot(None)
+            )
+        )
+        result = await self.session.execute(stmt_expiry)
+        earliest_expires = result.scalar()
+        
+        # Compute urgency
+        urgency = None
+        if earliest_expires:
+            days_until = (earliest_expires - now).days
+            if days_until < 7:
+                urgency = 'urgent'
+            elif days_until < 14:
+                urgency = 'watching'
+            else:
+                urgency = 'low'
+        
+        # Count verified signals
+        stmt_verified = select(
+            func.count(Signal.id).label('total'),
+            func.sum(func.cast(Signal.status == 'verified_correct', Integer)).label('correct')
+        ).where(
+            and_(
+                Signal.theme_id == theme_id,
+                Signal.status.in_(['verified_correct', 'verified_wrong'])
+            )
+        )
+        result = await self.session.execute(stmt_verified)
+        verified = result.one()
+        
+        verified_count = verified.total or 0
+        correct_count = verified.correct or 0
+        accuracy = None
+        if verified_count > 0:
+            accuracy = correct_count / verified_count
+        
+        # Update theme
+        theme.signals_count = signals_count
+        theme.earliest_signal_expires = earliest_expires
+        theme.urgency = urgency
+        theme.signals_verified_count = verified_count
+        theme.signals_correct_count = correct_count
+        theme.signals_accuracy = accuracy
+        theme.updated_at = now
+        
+        return await self.update(theme)
+    
+    async def update_narrative(
+        self,
+        theme_id: str,
+        narrative: str
+    ) -> Optional[Theme]:
+        """
+        Update the synthesized narrative for a theme.
+        
+        Used by: LLM pipeline when adding signals to theme
+        narrative: AI-generated summary of all signal reasonings
+        """
+        theme = await self.get(theme_id)
+        if not theme:
+            return None
+        
+        theme.narrative = narrative
+        theme.updated_at = self.now()
+        
+        return await self.update(theme)

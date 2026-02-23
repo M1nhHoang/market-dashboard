@@ -1,15 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, Activity, TrendingUp, AlertCircle, Calendar, Settings, Radio, Flame, Eye } from 'lucide-react';
-import { getHealth, getLatestRun, getIndicators, getKeyEvents, getOtherNews, getSignals, getSignalAccuracy, getThemes, getWatchlist, getCalendar, createWatchlistItem, dismissWatchlistItem, snoozeWatchlistItem, restoreWatchlistItem, deleteWatchlistItem } from './services/api';
+import { 
+  getHealth, getLatestRun, getIndicators, getKeyEvents, getOtherNews, 
+  getWatchlist, getCalendar, 
+  createWatchlistItem, dismissWatchlistItem, snoozeWatchlistItem, 
+  restoreWatchlistItem, deleteWatchlistItem,
+  // Trends API (replaces separate themes/signals)
+  getTrends, getTrend, getUrgentTrendsSidebar 
+} from './services/api';
 import { useFetch, useModal } from './hooks';
 import { formatDateTime, formatRelativeTime } from './utils/format';
 import IndicatorPanel from './components/IndicatorPanel';
 import EventList from './components/EventList';
 import EventDetail from './components/EventDetail';
-import SignalPanel from './components/SignalPanel';
-import SignalDetail from './components/SignalDetail';
-import ThemePanel from './components/ThemePanel';
-import ThemeDetail from './components/ThemeDetail';
+import SignalDetail from './components/SignalDetail'; // Used when clicking signal in TrendDetail
+import TrendsPanel from './components/TrendsPanel'; // Unified Trends dashboard
+import TrendDetail from './components/TrendDetail'; // Full Trend modal view
 import WatchlistPanel from './components/WatchlistPanel';
 import WatchlistAddModal from './components/WatchlistAddModal';
 import CalendarPanel from './components/CalendarPanel';
@@ -22,8 +28,8 @@ function App() {
   
   // Modals
   const eventModal = useModal();
-  const signalModal = useModal();
-  const themeModal = useModal();
+  const signalModal = useModal(); // For viewing signal from TrendDetail
+  const trendModal = useModal(); // For TrendDetail
 
   // Data fetching
   const { data: healthData } = useFetch(getHealth, [], true);
@@ -31,11 +37,11 @@ function App() {
   const { data: indicatorsData, loading: indicatorsLoading, execute: refetchIndicators } = useFetch(getIndicators, [], true);
   const { data: keyEventsData, loading: eventsLoading, execute: refetchEvents } = useFetch(getKeyEvents, [], true);
   const { data: otherNewsData, execute: refetchOtherNews } = useFetch(getOtherNews, [], true);
-  const { data: signalsData, loading: signalsLoading, execute: refetchSignals } = useFetch(getSignals, [], true);
-  const { data: accuracyData, execute: refetchAccuracy } = useFetch(getSignalAccuracy, [], true);
-  const { data: themesData, loading: themesLoading, execute: refetchThemes } = useFetch(getThemes, [], true);
   const { data: watchlistData, loading: watchlistLoading, execute: refetchWatchlist } = useFetch(getWatchlist, [], true);
   const { data: calendarData, execute: refetchCalendar } = useFetch(getCalendar, [], true);
+  // Trends API (replaces separate themes/signals)
+  const { data: trendsData, loading: trendsLoading, execute: refetchTrends } = useFetch(getTrends, [], true);
+  const { data: sidebarTrends, execute: refetchSidebarTrends } = useFetch(getUrgentTrendsSidebar, [], true);
 
   // Manual refresh
   const handleRefresh = async () => {
@@ -46,11 +52,10 @@ function App() {
         refetchIndicators(),
         refetchEvents(),
         refetchOtherNews(),
-        refetchSignals(),
-        refetchAccuracy(),
-        refetchThemes(),
         refetchWatchlist(),
         refetchCalendar(),
+        refetchTrends(),
+        refetchSidebarTrends(),
       ]);
     } catch (err) {
       console.error('Refresh failed:', err);
@@ -196,33 +201,19 @@ function App() {
             >
               📋 All News
             </button>
+            {/* NEW: Unified Trends tab replaces separate Signals + Themes tabs */}
             <button
-              onClick={() => setActiveTab('signals')}
+              onClick={() => setActiveTab('trends')}
               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'signals'
-                  ? 'text-purple-600 border-purple-600'
-                  : 'text-gray-500 border-transparent hover:text-gray-700'
-              }`}
-            >
-              📡 Signals
-              {signalsData?.signals?.filter(s => s.status === 'active').length > 0 && (
-                <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-purple-100 text-purple-700 rounded-full">
-                  {signalsData.signals.filter(s => s.status === 'active').length}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('themes')}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'themes'
+                activeTab === 'trends'
                   ? 'text-orange-600 border-orange-600'
                   : 'text-gray-500 border-transparent hover:text-gray-700'
               }`}
             >
-              🔥 Themes
-              {themesData?.themes?.filter(t => t.status === 'active' || t.status === 'emerging').length > 0 && (
-                <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-orange-100 text-orange-700 rounded-full">
-                  {themesData.themes.filter(t => t.status === 'active' || t.status === 'emerging').length}
+              🔥 Trends
+              {trendsData?.summary?.urgent_count > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-red-100 text-red-700 rounded-full">
+                  {trendsData.summary.urgent_count}
                 </span>
               )}
             </button>
@@ -247,20 +238,13 @@ function App() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 py-6">
-        {activeTab === 'signals' ? (
-          // Signals View
-          <SignalPanel
-            signals={signalsData?.signals || []}
-            accuracyStats={accuracyData}
-            onSelectSignal={(signal) => signalModal.open(signal)}
-            loading={signalsLoading}
-          />
-        ) : activeTab === 'themes' ? (
-          // Themes View
-          <ThemePanel
-            themes={themesData?.themes || []}
-            onSelectTheme={(theme) => themeModal.open(theme)}
-            loading={themesLoading}
+        {activeTab === 'trends' ? (
+          // NEW: Unified Trends View (replaces separate Signals + Themes)
+          <TrendsPanel
+            trends={trendsData?.trends || []}
+            summary={trendsData?.summary}
+            onSelectTrend={(trend) => trendModal.open(trend)}
+            loading={trendsLoading}
           />
         ) : activeTab === 'watchlist' ? (
           // Watchlist View
@@ -272,7 +256,7 @@ function App() {
             onSnooze={handleSnoozeWatchlistItem}
             onRestore={handleRestoreWatchlistItem}
             onDelete={handleDeleteWatchlistItem}
-            onViewTheme={(theme) => { setActiveTab('themes'); themeModal.open(theme); }}
+            onViewTheme={(theme) => { setActiveTab('trends'); trendModal.open(theme); }}
           />
         ) : activeTab === 'all' ? (
           // All News View
@@ -300,45 +284,69 @@ function App() {
               <div className="space-y-6">
                 <CalendarPanel events={calendarData?.events || []} />
                 
-                {/* Active Themes Summary */}
+                {/* NEW: Active Trends Summary (replaces separate Themes + Signals) */}
                 <div>
                   <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                     <Flame className="w-4 h-4 text-orange-500" />
-                    Active Themes
+                    Active Trends
                   </h3>
-                  {themesData?.themes?.filter(t => t.status === 'active' || t.status === 'emerging').slice(0, 3).map(theme => (
-                    <div
-                      key={theme.id}
-                      onClick={() => { setActiveTab('themes'); themeModal.open(theme); }}
-                      className="p-3 mb-2 bg-white rounded-lg border border-gray-200 hover:border-orange-300 cursor-pointer"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm">🔥</span>
-                        <span className="text-sm font-medium text-gray-900 truncate">{theme.name_vi || theme.name}</span>
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">Strength: {theme.strength?.toFixed(1)}</div>
+                  
+                  {/* Urgent Trends */}
+                  {sidebarTrends?.urgent?.length > 0 && (
+                    <div className="mb-3">
+                      <div className="text-xs text-red-600 font-medium mb-1">⚡ Urgent</div>
+                      {sidebarTrends.urgent.map(trend => (
+                        <div
+                          key={trend.id}
+                          onClick={() => { setActiveTab('trends'); trendModal.open(trend); }}
+                          className="p-3 mb-2 bg-white rounded-lg border border-red-200 hover:border-red-400 cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm">🔥</span>
+                            <span className="text-sm font-medium text-gray-900 truncate">{trend.name_vi || trend.name}</span>
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            {trend.signals_count} signals • Expires soon
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-
-                {/* Active Signals Summary */}
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                    <Radio className="w-4 h-4 text-purple-500" />
-                    Active Signals
-                  </h3>
-                  {signalsData?.signals?.filter(s => s.status === 'active').slice(0, 3).map(signal => (
-                    <div
-                      key={signal.id}
-                      onClick={() => { setActiveTab('signals'); signalModal.open(signal); }}
-                      className="p-3 mb-2 bg-white rounded-lg border border-gray-200 hover:border-purple-300 cursor-pointer"
-                    >
-                      <div className="text-sm font-medium text-gray-900 line-clamp-2">{signal.prediction_text}</div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        {signal.target_indicator} • {signal.confidence}
-                      </div>
+                  )}
+                  
+                  {/* Watching Trends */}
+                  {sidebarTrends?.watching?.length > 0 && (
+                    <div>
+                      <div className="text-xs text-yellow-600 font-medium mb-1">👁 Watching</div>
+                      {sidebarTrends.watching.map(trend => (
+                        <div
+                          key={trend.id}
+                          onClick={() => { setActiveTab('trends'); trendModal.open(trend); }}
+                          className="p-3 mb-2 bg-white rounded-lg border border-gray-200 hover:border-orange-300 cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm">👁</span>
+                            <span className="text-sm font-medium text-gray-900 truncate">{trend.name_vi || trend.name}</span>
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            {trend.signals_count} signals
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
+                  
+                  {/* No trends */}
+                  {(!sidebarTrends?.urgent?.length && !sidebarTrends?.watching?.length) && (
+                    <div className="text-sm text-gray-400 py-2">No active trends</div>
+                  )}
+                  
+                  {/* View all button */}
+                  <button
+                    onClick={() => setActiveTab('trends')}
+                    className="text-sm text-primary-600 hover:text-primary-800 mt-2"
+                  >
+                    View all trends →
+                  </button>
                 </div>
               </div>
             </div>
@@ -382,51 +390,63 @@ function App() {
             <div className="lg:col-span-1 space-y-6">
               <CalendarPanel events={calendarData?.events || []} />
               
-              {/* Active Themes */}
+              {/* NEW: Active Trends (replaces separate Themes + Signals) */}
               <div>
                 <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                   <Flame className="w-4 h-4 text-orange-500" />
-                  Themes
+                  Active Trends
                 </h3>
-                {themesData?.themes?.filter(t => t.status === 'active' || t.status === 'emerging' || t.strength >= 5).slice(0, 3).map(theme => (
-                  <div
-                    key={theme.id}
-                    onClick={() => { setActiveTab('themes'); themeModal.open(theme); }}
-                    className="p-3 mb-2 bg-white rounded-lg border border-gray-200 hover:border-orange-300 cursor-pointer"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm">🔥</span>
-                      <span className="text-sm font-medium text-gray-900 truncate">{theme.name_vi || theme.name}</span>
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">Strength: {theme.strength?.toFixed(1)}</div>
+                
+                {/* Urgent */}
+                {sidebarTrends?.urgent?.length > 0 && (
+                  <div className="mb-2">
+                    <div className="text-xs text-red-600 font-medium mb-1">⚡ Urgent</div>
+                    {sidebarTrends.urgent.slice(0, 2).map(trend => (
+                      <div
+                        key={trend.id}
+                        onClick={() => { setActiveTab('trends'); trendModal.open(trend); }}
+                        className="p-3 mb-2 bg-white rounded-lg border border-red-200 hover:border-red-400 cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm">🔥</span>
+                          <span className="text-sm font-medium text-gray-900 truncate">{trend.name_vi || trend.name}</span>
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">{trend.signals_count} signals</div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-                {(!themesData?.themes || themesData.themes.filter(t => t.status === 'active' || t.status === 'emerging' || t.strength >= 5).length === 0) && (
-                  <div className="text-sm text-gray-400 py-2">No active themes</div>
                 )}
-              </div>
-              
-              {/* Active Signals */}
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                  <Radio className="w-4 h-4 text-purple-500" />
-                  Signals
-                </h3>
-                {signalsData?.signals?.filter(s => s.status === 'active').slice(0, 3).map(signal => (
-                  <div
-                    key={signal.id}
-                    onClick={() => { setActiveTab('signals'); signalModal.open(signal); }}
-                    className="p-3 mb-2 bg-white rounded-lg border border-gray-200 hover:border-purple-300 cursor-pointer"
-                  >
-                    <div className="text-sm font-medium text-gray-900 line-clamp-2">{signal.prediction_text}</div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      {signal.target_indicator} • {signal.confidence}
-                    </div>
+                
+                {/* Watching */}
+                {sidebarTrends?.watching?.length > 0 && (
+                  <div>
+                    <div className="text-xs text-yellow-600 font-medium mb-1">👁 Watching</div>
+                    {sidebarTrends.watching.slice(0, 2).map(trend => (
+                      <div
+                        key={trend.id}
+                        onClick={() => { setActiveTab('trends'); trendModal.open(trend); }}
+                        className="p-3 mb-2 bg-white rounded-lg border border-gray-200 hover:border-orange-300 cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm">👁</span>
+                          <span className="text-sm font-medium text-gray-900 truncate">{trend.name_vi || trend.name}</span>
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">{trend.signals_count} signals</div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-                {(!signalsData?.signals || signalsData.signals.filter(s => s.status === 'active').length === 0) && (
-                  <div className="text-sm text-gray-400 py-2">No active signals</div>
                 )}
+                
+                {(!sidebarTrends?.urgent?.length && !sidebarTrends?.watching?.length) && (
+                  <div className="text-sm text-gray-400 py-2">No active trends</div>
+                )}
+                
+                <button
+                  onClick={() => setActiveTab('trends')}
+                  className="text-sm text-primary-600 hover:text-primary-800 mt-2"
+                >
+                  View all →
+                </button>
               </div>
             </div>
           </div>
@@ -443,9 +463,9 @@ function App() {
                 <span>•</span>
                 <span>Events: {latestRun.run.events_extracted || 0}</span>
                 <span>•</span>
-                <span>Signals: {signalsData?.signals?.filter(s => s.status === 'active').length || 0}</span>
+                <span>Trends: {trendsData?.summary?.total || 0}</span>
                 <span>•</span>
-                <span>Themes: {themesData?.themes?.filter(t => t.status === 'active' || t.status === 'emerging').length || 0}</span>
+                <span>⚡ Urgent: {trendsData?.summary?.urgent_count || 0}</span>
               </>
             )}
           </div>
@@ -465,7 +485,7 @@ function App() {
         />
       )}
 
-      {/* Signal Detail Modal */}
+      {/* Signal Detail Modal - shown when clicking a signal from TrendDetail */}
       {signalModal.isOpen && (
         <SignalDetail
           signal={signalModal.data}
@@ -473,17 +493,21 @@ function App() {
         />
       )}
 
-      {/* Theme Detail Modal */}
-      {themeModal.isOpen && (
-        <ThemeDetail
-          theme={themeModal.data}
-          onClose={themeModal.close}
+      {/* Trend Detail Modal - unified view with signals */}
+      {trendModal.isOpen && (
+        <TrendDetail
+          trend={trendModal.data}
+          onClose={trendModal.close}
+          onArchive={() => {
+            trendModal.close();
+            refetchTrends();
+          }}
           onViewEvent={(event) => {
-            themeModal.close();
+            trendModal.close();
             eventModal.open(event);
           }}
           onViewSignal={(signal) => {
-            themeModal.close();
+            trendModal.close();
             signalModal.open(signal);
           }}
         />

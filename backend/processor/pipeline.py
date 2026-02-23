@@ -36,10 +36,12 @@ from repositories import (
 from data_transformers import CrawlerOutput
 from data_transformers.models import MetricRecord, EventRecord, CalendarRecord
 
+from llm import set_llm_context
 from .classifier import Classifier
 from .scorer import Scorer
 from .ranker import Ranker
 from .context_builder import ContextBuilder
+from .narrative_synthesizer import NarrativeSynthesizer
 
 
 class Pipeline:
@@ -62,6 +64,7 @@ class Pipeline:
         self.classifier = Classifier()
         self.scorer = Scorer()
         self.ranker = Ranker()
+        self.narrative_synthesizer = NarrativeSynthesizer()
         
     async def run(self) -> dict:
         """
@@ -73,6 +76,9 @@ class Pipeline:
         run_start = datetime.now()
         run_id = run_start.strftime("%Y%m%d_%H%M%S")
         run_date = date.today()
+        
+        # Set LLM context for call logging
+        set_llm_context(run_id=run_id)
         
         logger.info(f"=== Starting Pipeline Run {run_id} ===")
         
@@ -209,6 +215,7 @@ class Pipeline:
                 # Note: Deduplication is now done at crawler level by title matching.
                 # We still compute hash for storage but skip DB lookup here.
                 logger.info("Step 5: Layer 1 - Classification...")
+                set_llm_context(task_type="classification")
                 
                 classified_events = []
                 irrelevant_skipped = 0
@@ -302,6 +309,7 @@ class Pipeline:
                 # Step 7: Layer 2 - Scoring
                 # ============================================
                 logger.info(f"Step 7: Layer 2 - Scoring {len(classified_events)} events...")
+                set_llm_context(task_type="scoring")
                 
                 scored_events = []
                 for ce in classified_events:
@@ -474,9 +482,103 @@ class Pipeline:
                 logger.info(f"Saved {events_saved} events, {signals_created} signals, {themes_updated} themes")
                 
                 # ============================================
+                # Step 8.5: Update Trend Stats & Narratives
+                # Only recompute themes affected by this run
+                # (themes that had events/signals added)
+                # ============================================
+                logger.info("Step 8.5: Updating trend stats and generating narratives...")
+                
+                narratives_updated = 0
+                affected_theme_ids = set()
+                
+                # Collect theme IDs affected by this pipeline run
+                # These are themes that had events or signals added in Step 8
+                if themes_updated > 0 or signals_created > 0:
+                    # Query themes that were updated in this run window
+                    all_themes = await themes_repo.get_active_and_emerging()
+                    for theme in all_themes:
+                        # Check if theme was touched: updated_at within last few minutes
+                        if theme.updated_at and (datetime.now() - theme.updated_at).total_seconds() < 300:
+                            affected_theme_ids.add(theme.id)
+                
+                if affected_theme_ids:
+                    logger.info(f"Recomputing stats for {len(affected_theme_ids)} affected themes")
+                    
+                    for theme_id in affected_theme_ids:
+                        try:
+                            theme = await themes_repo.get(theme_id)
+                            if not theme:
+                                continue
+                            
+                            # Recompute trend stats (urgency, signals_count, etc)
+                            await themes_repo.recompute_trend_stats(theme.id)
+                            
+                            # Get signals for this theme
+                            theme_signals = await signals_repo.get_by_theme(theme.id, limit=20)
+                            active_signals = [s for s in theme_signals if s.status == 'active']
+                            
+                            if active_signals:
+                                # Prepare signal data for synthesizer
+                                # Include full detail for better narrative generation
+                                signals_data = [
+                                    {
+                                        'prediction': s.prediction,
+                                        'direction': s.direction,
+                                        'target_indicator': s.target_indicator,
+                                        'target_range_low': s.target_range_low,
+                                        'target_range_high': s.target_range_high,
+                                        'confidence': s.confidence,
+                                        'expires_at': str(s.expires_at) if s.expires_at else None,
+                                        'reasoning': s.reasoning,
+                                    }
+                                    for s in active_signals
+                                ]
+                                
+                                # Get related indicators
+                                indicators_data = []
+                                if theme.related_indicators:
+                                    for ind_id in theme.related_indicators[:5]:
+                                        indicator = await indicators_repo.get(ind_id)
+                                        if indicator:
+                                            indicators_data.append({
+                                                'indicator_id': ind_id,
+                                                'name': indicator.name,
+                                                'current_value': indicator.current_value,
+                                                'unit': indicator.unit,
+                                            })
+                                
+                                # Generate narrative via LLM (sync call wrapped in thread)
+                                # NarrativeSynthesizer.synthesize() is sync because
+                                # LLMClient.generate() uses blocking HTTP. We run it
+                                # in a thread to avoid blocking the async event loop.
+                                import asyncio
+                                narrative = await asyncio.to_thread(
+                                    self.narrative_synthesizer.synthesize,
+                                    theme_name=theme.name,
+                                    theme_description=theme.description or '',
+                                    first_seen=str(theme.first_seen) if theme.first_seen else '',
+                                    strength=theme.strength or 0,
+                                    signals=signals_data,
+                                    indicators=indicators_data,
+                                )
+                                
+                                if narrative:
+                                    await themes_repo.update_narrative(theme.id, narrative)
+                                    narratives_updated += 1
+                        except Exception as e:
+                            logger.warning(f"Failed to update narrative for theme {theme_id}: {e}")
+                
+                results["steps"]["narratives"] = {
+                    "affected_themes": len(affected_theme_ids),
+                    "narratives_updated": narratives_updated,
+                }
+                logger.info(f"Updated {narratives_updated} trend narratives ({len(affected_theme_ids)} affected)")
+                
+                # ============================================
                 # Step 9: Layer 3 - Rank all active events
                 # ============================================
                 logger.info("Step 9: Layer 3 - Ranking all active events...")
+                set_llm_context(task_type="ranking")
                 
                 # Get all active events
                 all_active = await events_repo.get_active_events(max_age_days=30)
