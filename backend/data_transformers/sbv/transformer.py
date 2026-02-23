@@ -38,6 +38,8 @@ from .mappings import (
     INTERBANK_TERM_MAP,
     POLICY_RATE_MAP,
     GOLD_PRICE_MAP,
+    GOLD_TYPE_MAP,
+    GOLD_BRANCH_MAP,
 )
 
 
@@ -124,10 +126,10 @@ class SBVTransformer(BaseTransformer):
                         stats["policy_rate_count"] += 1
                         
                 elif item_type == "gold_price":
-                    metric = self._transform_gold_price(item)
-                    if metric:
-                        metrics.append(metric)
-                        stats["gold_price_count"] += 1
+                    gold_metrics = self._transform_gold_price(item)
+                    if gold_metrics:
+                        metrics.extend(gold_metrics)
+                        stats["gold_price_count"] += len(gold_metrics)
                         
                 elif item_type == "cpi":
                     cpi_metrics = self._transform_cpi(item)
@@ -263,45 +265,83 @@ class SBVTransformer(BaseTransformer):
             source_url=item.get("source_url"),
         )
     
-    def _transform_gold_price(self, item: Dict[str, Any]) -> Optional[MetricRecord]:
-        """Transform gold price item to MetricRecord."""
-        gold_type = item.get("gold_type", "")
+    def _transform_gold_price(self, item: Dict[str, Any]) -> List[MetricRecord]:
+        """Transform gold price item to MetricRecord(s).
+        
+        Stores ALL gold prices from SJC API:
+        - HCM items: one indicator per gold type (gold_sjc_bar, gold_ring, etc.)
+        - Regional items: separate indicators (gold_sjc_bar_mien_bac, etc.)
+        
+        Each indicator stores buy_price as value, with sell_price in attributes.
+        
+        SJC API fields (mapped by crawler):
+        - organization (BranchName): e.g., "Hồ Chí Minh", "Miền Bắc"
+        - gold_type (TypeName): e.g., "Vàng SJC 1L, 10L, 1KG"
+        - buy_price (BuyValue): float
+        - sell_price (SellValue): float
+        """
+        gold_type = item.get("gold_type", "").strip()
+        organization = item.get("organization", "").strip()
         buy_price = item.get("buy_price")
-        organization = item.get("organization", "")
+        sell_price = item.get("sell_price")
         
-        if buy_price is None or buy_price == 0:
-            return None
+        if not buy_price or buy_price == 0:
+            return []
         
-        # Only track main SJC price from the official SJC company
-        mapping = GOLD_PRICE_MAP.get("SJC")
-        if not mapping:
-            return None
-            
-        # Only accept if from official SJC and is the main price type
-        is_official_sjc = "SJC" in organization.upper() and "VÀNG BẠC ĐÁ QUÝ SÀI GÒN" in organization
-        is_main_type = gold_type == "SJC"
+        # Look up gold type mapping
+        type_mapping = GOLD_TYPE_MAP.get(gold_type)
+        if not type_mapping:
+            # Unknown gold type - skip with warning
+            logger.warning(f"Unknown gold type: '{gold_type}' from '{organization}'")
+            return []
         
-        if not (is_official_sjc and is_main_type):
-            return None
+        # Determine branch
+        branch_slug = GOLD_BRANCH_MAP.get(organization)
+        if not branch_slug:
+            logger.warning(f"Unknown gold branch: '{organization}'")
+            return []
         
-        return MetricRecord(
+        # Build metric_id
+        base_id = type_mapping["indicator_id"]
+        if branch_slug == "hcm":
+            metric_id = base_id  # HCM is the reference → no suffix
+        else:
+            metric_id = f"{base_id}_{branch_slug}"  # Regional → add suffix
+        
+        # Build name
+        if branch_slug == "hcm":
+            name = type_mapping["name"]
+            name_vi = type_mapping["name_vi"]
+        else:
+            name = f"{type_mapping['name']} ({organization})"
+            name_vi = f"{type_mapping['name_vi']} ({organization})"
+        
+        # Attributes: store both buy/sell + metadata
+        attributes = {
+            "buy_price": buy_price,
+            "sell_price": sell_price,
+            "organization": organization,
+            "branch": branch_slug,
+            "gold_type": gold_type,
+            "original_unit": item.get("price_unit"),
+            "is_primary": type_mapping.get("is_primary", False) and branch_slug == "hcm",
+        }
+        
+        # Subcategory: distinguish HCM reference vs regional
+        subcategory = "gold" if branch_slug == "hcm" else "gold_regional"
+        
+        return [MetricRecord(
             metric_type=MetricType.GOLD_PRICE,
-            metric_id=mapping["indicator_id"],
+            metric_id=metric_id,
             value=float(buy_price),
             unit="VND/lượng",
             date=self._parse_date(item.get("date")),
-            name=mapping["name"],
-            name_vi=mapping["name_vi"],
-            attributes={
-                "buy_price": item.get("buy_price"),
-                "sell_price": item.get("sell_price"),
-                "organization": organization,
-                "gold_type": gold_type,
-                "original_unit": item.get("price_unit"),
-            },
+            name=name,
+            name_vi=name_vi,
+            attributes=attributes,
             source=item.get("source", "SBV"),
             source_url=item.get("source_url"),
-        )
+        )]
     
     def _transform_cpi(self, item: Dict[str, Any]) -> List[MetricRecord]:
         """

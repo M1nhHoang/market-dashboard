@@ -58,6 +58,7 @@ class IndicatorRepository(BaseRepository[Indicator]):
         change: float = None,
         change_pct: float = None,
         trend: str = None,
+        attributes: str = None,
     ) -> Indicator:
         """
         Insert or update an indicator.
@@ -82,6 +83,7 @@ class IndicatorRepository(BaseRepository[Indicator]):
             existing.change = change
             existing.change_pct = change_pct
             existing.trend = trend
+            existing.attributes = attributes or existing.attributes
             existing.updated_at = now
             return await self.update(existing)
         else:
@@ -99,6 +101,7 @@ class IndicatorRepository(BaseRepository[Indicator]):
                 change=change,
                 change_pct=change_pct,
                 trend=trend,
+                attributes=attributes,
                 created_at=now,
                 updated_at=now,
             )

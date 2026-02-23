@@ -21,6 +21,7 @@ data/processed/*
 data/context/*
 data/logs/*
 data/*.db
+data/*.db-journal
 !data/.gitkeep
 !data/**/.gitkeep
 

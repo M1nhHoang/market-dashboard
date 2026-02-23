@@ -38,6 +38,7 @@ from .sbv import SBVTransformer
 from .vneconomy import VnEconomyTransformer
 from .cafef import CafeFTransformer
 from .vnexpress import VnExpressTransformer
+from .vietcombank import VietcombankTransformer
 
 __all__ = [
     # Models
@@ -54,4 +55,5 @@ __all__ = [
     "VnEconomyTransformer",
     "CafeFTransformer",
     "VnExpressTransformer",
+    "VietcombankTransformer",
 ]

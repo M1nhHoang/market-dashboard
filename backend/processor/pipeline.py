@@ -751,6 +751,37 @@ class Pipeline:
         except Exception as e:
             logger.error(f"VnExpress crawler error: {e}")
         
+        # Vietcombank Exchange Rates Crawler
+        try:
+            logger.info("Crawling Vietcombank exchange rates...")
+            from crawlers.vietcombank_crawler import VietcombankCrawler
+            
+            vcb_crawler = VietcombankCrawler(data_dir=self.data_dir)
+            
+            raw_result = await vcb_crawler.run(
+                save_raw=False,
+            )
+            
+            if raw_result.success:
+                output = vcb_crawler.transformer.transform(raw_result.to_dict())
+                outputs.append(output)
+                logger.info(f"Vietcombank: {output.summary()}")
+                # DEBUG: log each metric so we can verify in scheduler logs
+                for m in output.metrics:
+                    logger.debug(
+                        f"[Vietcombank] metric_id={m.metric_id} "
+                        f"value={m.value} unit={m.unit} date={m.date} "
+                        f"source={m.source}"
+                    )
+            else:
+                logger.warning(
+                    f"Vietcombank crawl failed: {raw_result.error} "
+                    f"(data items returned: {len(raw_result.data)})"
+                )
+                
+        except Exception as e:
+            logger.exception(f"Vietcombank crawler error: {e}")  # full traceback in logs
+        
         # TODO: Add more crawlers here (Global, Calendar)
         
         return outputs
@@ -794,10 +825,32 @@ class Pipeline:
             change=change,
             change_pct=change_pct,
             trend=trend,
+            attributes=self._serialize_attributes(metric.attributes),
         )
     
-    def _get_indicator_category(self, metric_type: str) -> str:
-        """Map metric type to indicator category."""
+    @staticmethod
+    def _serialize_attributes(attrs: dict = None) -> str:
+        """Serialize attributes dict to JSON string for storage."""
+        if not attrs:
+            return None
+        import json
+        # Filter out None values and non-serializable types
+        clean = {}
+        for k, v in attrs.items():
+            if v is not None:
+                try:
+                    json.dumps(v)
+                    clean[k] = v
+                except (TypeError, ValueError):
+                    clean[k] = str(v)
+        return json.dumps(clean, ensure_ascii=False) if clean else None
+    
+    def _get_indicator_category(self, metric_type) -> str:
+        """Map metric type to indicator category.
+        
+        Args:
+            metric_type: MetricType enum or string. Uses .value for enum lookup.
+        """
         mapping = {
             "exchange_rate": "vietnam_forex",
             "interbank_rate": "vietnam_monetary",
@@ -810,7 +863,10 @@ class Pipeline:
             "bond_yield": "global_macro",
             "commodity": "global_commodity",
         }
-        return mapping.get(str(metric_type), "other")
+        # MetricType is a str Enum: str(MetricType.X) = "MetricType.X", not "x"
+        # Use .value to get the raw string for dict lookup
+        key = metric_type.value if hasattr(metric_type, 'value') else str(metric_type)
+        return mapping.get(key, "other")
     
     def _compute_hash(self, event: EventRecord) -> str:
         """Compute hash for event deduplication."""

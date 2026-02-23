@@ -51,7 +51,16 @@ class SignalRepository(BaseRepository[Signal]):
         return result.scalars().all()
     
     async def get_expired_unverified(self) -> Sequence[Signal]:
-        """Get signals that have expired but not verified."""
+        """Get signals that have expired but not verified.
+        
+        TODO: Used by signal auto-verification background job (not yet implemented).
+        The job should:
+        1. Call this method to get expired active signals
+        2. For each signal, query indicator_history for actual_value at expires_at
+        3. Compare actual_value against direction + target_range_low/high
+        4. Call self.verify() with correct status
+        5. Aggregate into signal_accuracy_stats
+        """
         now = self.now()
         stmt = (
             select(Signal)

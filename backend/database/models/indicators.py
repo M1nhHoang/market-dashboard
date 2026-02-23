@@ -51,6 +51,9 @@ class Indicator(Base, TimestampMixin):
     source: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     source_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
+    # Extra metadata (JSON string)
+    attributes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
     # Relationships
     history: Mapped[List["IndicatorHistory"]] = relationship(
         "IndicatorHistory",

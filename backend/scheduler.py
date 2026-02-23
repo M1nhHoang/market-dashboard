@@ -65,6 +65,12 @@ class MarketIntelligenceScheduler:
             next_run_time=datetime.now() + timedelta(minutes=1)  # First run in 1 minute
         )
         
+        # TODO: Add signal auto-verification job
+        # - Runs daily, checks expired signals via SignalRepository.get_expired_unverified()
+        # - Compares signal prediction (direction + target_range) against actual indicator_history values
+        # - Calls SignalRepository.verify() to update status (verified_correct/verified_wrong/expired)
+        # - Aggregates results into signal_accuracy_stats via SignalAccuracyStatsRepository.upsert_stats()
+
         logger.info("Scheduler setup complete with 1 job (full pipeline)")
         self._log_schedule()
         

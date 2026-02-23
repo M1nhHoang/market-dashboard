@@ -54,11 +54,119 @@ POLICY_RATE_MAP: Dict[str, Dict[str, str]] = {
 # GOLD PRICE MAPPINGS
 # ============================================
 
+# Map SJC API TypeName to indicator ID and metadata
+GOLD_TYPE_MAP: Dict[str, Dict[str, str]] = {
+    "Vàng SJC 1L, 10L, 1KG": {
+        "indicator_id": "gold_sjc_bar",
+        "name": "SJC Gold Bar (1L-1KG)",
+        "name_vi": "Vàng miếng SJC",
+        "short_vi": "SJC miếng",
+        "is_primary": True,
+    },
+    "Vàng SJC 5 chỉ": {
+        "indicator_id": "gold_sjc_5chi",
+        "name": "SJC Gold 5 Chi",
+        "name_vi": "Vàng SJC 5 chỉ",
+        "short_vi": "SJC 5 chỉ",
+    },
+    "Vàng SJC 0.5 chỉ, 1 chỉ, 2 chỉ": {
+        "indicator_id": "gold_sjc_small",
+        "name": "SJC Gold (0.5-2 Chi)",
+        "name_vi": "Vàng SJC 0.5-2 chỉ",
+        "short_vi": "SJC 0.5-2 chỉ",
+    },
+    "Vàng nhẫn SJC 99,99% 1 chỉ, 2 chỉ, 5 chỉ": {
+        "indicator_id": "gold_ring",
+        "name": "SJC Gold Ring 99.99%",
+        "name_vi": "Nhẫn SJC 99,99%",
+        "short_vi": "Nhẫn SJC",
+        "is_primary": True,
+    },
+    "Vàng nhẫn SJC 99,99% 0.5 chỉ, 0.3 chỉ": {
+        "indicator_id": "gold_ring_half",
+        "name": "SJC Gold Ring 99.99% (Small)",
+        "name_vi": "Nhẫn SJC 99,99% nhỏ",
+        "short_vi": "Nhẫn SJC nhỏ",
+    },
+    "Nữ trang 99,99%": {
+        "indicator_id": "gold_jewelry_9999",
+        "name": "Gold Jewelry 99.99%",
+        "name_vi": "Nữ trang 99,99%",
+        "short_vi": "NT 99,99%",
+    },
+    "Nữ trang 99%": {
+        "indicator_id": "gold_jewelry_99",
+        "name": "Gold Jewelry 99%",
+        "name_vi": "Nữ trang 99%",
+        "short_vi": "NT 99%",
+    },
+    "Nữ trang 75%": {
+        "indicator_id": "gold_jewelry_75",
+        "name": "Gold Jewelry 75%",
+        "name_vi": "Nữ trang 75%",
+        "short_vi": "NT 75%",
+    },
+    "Nữ trang 68%": {
+        "indicator_id": "gold_jewelry_68",
+        "name": "Gold Jewelry 68%",
+        "name_vi": "Nữ trang 68%",
+        "short_vi": "NT 68%",
+    },
+    "Nữ trang 61%": {
+        "indicator_id": "gold_jewelry_61",
+        "name": "Gold Jewelry 61%",
+        "name_vi": "Nữ trang 61%",
+        "short_vi": "NT 61%",
+    },
+    "Nữ trang 58,3%": {
+        "indicator_id": "gold_jewelry_583",
+        "name": "Gold Jewelry 58.3%",
+        "name_vi": "Nữ trang 58,3%",
+        "short_vi": "NT 58,3%",
+    },
+    "Nữ trang 41,7%": {
+        "indicator_id": "gold_jewelry_417",
+        "name": "Gold Jewelry 41.7%",
+        "name_vi": "Nữ trang 41,7%",
+        "short_vi": "NT 41,7%",
+    },
+}
+
+# Map SJC API BranchName to slug (for regional metric_ids)
+GOLD_BRANCH_MAP: Dict[str, str] = {
+    "Hồ Chí Minh": "hcm",
+    "Miền Bắc": "mien_bac",
+    "Hạ Long": "ha_long",
+    "Hải Phòng": "hai_phong",
+    "Miền Trung": "mien_trung",
+    "Huế": "hue",
+    "Quảng Ngãi": "quang_ngai",
+    "Nha Trang": "nha_trang",
+    "Biên Hòa": "bien_hoa",
+    "Miền Tây": "mien_tay",
+    "Bạc Liêu": "bac_lieu",
+    "Cà Mau": "ca_mau",
+}
+
+# Primary gold indicators shown in compact view
+GOLD_PRIMARY_IDS = ["gold_sjc_bar", "gold_ring"]
+
+# All HCM gold indicator IDs (for INDICATOR_GROUPS)
+GOLD_ALL_HCM_IDS = [v["indicator_id"] for v in GOLD_TYPE_MAP.values()]
+
+# Regional SJC bar indicator IDs (auto-generated from BRANCH_MAP, excluding HCM)
+GOLD_REGIONAL_IDS = [
+    f"gold_sjc_bar_{slug}" 
+    for branch, slug in GOLD_BRANCH_MAP.items() 
+    if slug != "hcm"
+]
+
+# Backward-compatible single SJC mapping (kept for old code references)
 GOLD_PRICE_MAP: Dict[str, Dict[str, str]] = {
     "SJC": {
-        "indicator_id": "gold_sjc",
-        "name": "SJC Gold Price",
-        "name_vi": "Giá vàng SJC",
+        "indicator_id": "gold_sjc_bar",
+        "name": "SJC Gold Bar",
+        "name_vi": "Vàng miếng SJC",
     },
 }
 
@@ -146,20 +254,31 @@ INDICATOR_GROUPS: Dict[str, Dict[str, Any]] = {
     "vietnam_forex": {
         "display_name": "💱 Exchange Rate",
         "display_name_vi": "💱 Tỷ giá hối đoái",
-        "description": "USD/VND and other currency rates",
-        "indicators": ["usd_vnd_central"],
+        "description": "USD/VND and EUR/VND rates — SBV central + Vietcombank commercial",
+        "indicators": [
+            # SBV central reference rate
+            "usd_vnd_central",
+            # Vietcombank commercial rates (USD)
+            "usd_vnd_vcb_sell",
+            "usd_vnd_vcb_buy",
+            "usd_vnd_vcb_transfer",
+            # Vietcombank commercial rates (EUR)
+            "eur_vnd_vcb_sell",
+        ],
+    },
+    "vietnam_commodity": {
+        "display_name": "🪙 Gold Prices",
+        "display_name_vi": "🪙 Giá vàng SJC",
+        "description": "SJC gold prices - all types and regions",
+        "primary_indicators": GOLD_PRIMARY_IDS,
+        "indicators": GOLD_ALL_HCM_IDS + GOLD_REGIONAL_IDS,
+        "expandable": True,
     },
     "vietnam_inflation": {
         "display_name": "📈 Inflation",
         "display_name_vi": "📈 Lạm phát",
         "description": "CPI and inflation metrics",
         "indicators": ["cpi_mom", "cpi_yoy", "cpi_ytd", "core_inflation"],
-    },
-    "vietnam_commodity": {
-        "display_name": "🪙 Commodity",
-        "display_name_vi": "🪙 Hàng hóa",
-        "description": "Gold and other commodity prices",
-        "indicators": ["gold_sjc"],
     },
 }
 
@@ -233,9 +352,17 @@ INDICATOR_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "subcategory": "exchange_rate",
         "source": "SBV",
     },
-    "gold_sjc": {
-        "name": "SJC Gold Price",
-        "name_vi": "Giá vàng SJC",
+    "gold_sjc_bar": {
+        "name": "SJC Gold Bar (1L-1KG)",
+        "name_vi": "Vàng miếng SJC",
+        "unit": "VND/lượng",
+        "category": "vietnam_commodity",
+        "subcategory": "gold",
+        "source": "SBV/SJC",
+    },
+    "gold_ring": {
+        "name": "SJC Gold Ring 99.99%",
+        "name_vi": "Nhẫn SJC 99,99%",
         "unit": "VND/lượng",
         "category": "vietnam_commodity",
         "subcategory": "gold",

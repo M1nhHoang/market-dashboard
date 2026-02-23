@@ -64,17 +64,31 @@ async def list_indicators(
     
     indicators = [dict(row) for row in rows]
     
+    # Parse attributes JSON for indicators that have it
+    import json as _json
+    for ind in indicators:
+        if ind.get('attributes'):
+            try:
+                ind['attributes'] = _json.loads(ind['attributes'])
+            except (ValueError, TypeError):
+                pass
+    
     if grouped and not category:
         # Group by category
         grouped_data = {}
         for group_id, group_info in INDICATOR_GROUPS.items():
-            grouped_data[group_id] = {
+            group_result = {
                 "display_name": group_info["display_name"],
                 "indicators": [
                     ind for ind in indicators 
                     if ind.get('category') == group_id or ind.get('id') in group_info.get("indicators", [])
                 ]
             }
+            # Pass expandable metadata for gold group
+            if group_info.get("expandable"):
+                group_result["expandable"] = True
+                group_result["primary_indicators"] = group_info.get("primary_indicators", [])
+            grouped_data[group_id] = group_result
         return {"groups": grouped_data, "total": len(indicators)}
     
     return {"indicators": indicators}
@@ -803,13 +817,23 @@ async def get_run(run_id: str):
 async def trigger_refresh(background_tasks: BackgroundTasks):
     """Manually trigger data refresh and analysis."""
     from processor.pipeline import Pipeline
+    from database.session import close_engine
+    import asyncio
     
     def run_pipeline():
-        try:
+        async def _run():
+            # Close any existing engine from previous runs to avoid reusing
+            # an engine bound to a different event loop
+            await close_engine()
             pipeline = Pipeline()
-            result = pipeline.run()
+            return await pipeline.run()
+        
+        try:
+            result = asyncio.run(_run())
             return result
         except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Pipeline error: {e}", exc_info=True)
             return {"error": str(e)}
     
     background_tasks.add_task(run_pipeline)
@@ -828,7 +852,7 @@ async def trigger_ranking_refresh():
     
     try:
         pipeline = Pipeline()
-        result = pipeline.run_ranking_only()
+        result = await pipeline.run_ranking_only()
         return {
             "status": "success",
             "result": result
