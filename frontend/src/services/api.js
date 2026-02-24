@@ -112,6 +112,7 @@ export const archiveTheme = (id) =>
  * @param {boolean} params.with_summary - Include summary stats (default: true)
  * @param {boolean} params.include_fading - Include fading trends (default: false)
  * @param {number} params.limit - Max results (default: 30)
+ * @param {number} params.offset - Offset for pagination (default: 0)
  */
 export const getTrends = (params = {}) => {
   const query = new URLSearchParams(params).toString();

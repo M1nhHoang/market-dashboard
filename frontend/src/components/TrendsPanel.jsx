@@ -10,30 +10,59 @@
  * - Signals: Predictions with expiry dates
  * - Events: Evidence supporting the narrative
  * - Urgency: Computed from earliest signal expiry
+ * - Priority Score: Composite score (0-100) for importance ranking
+ * - Category: Auto-classified (gold, monetary, trade, forex, etc.)
  * 
  * ## LAYOUT:
- * - Overview stats bar (total trends, urgent count, accuracy)
- * - URGENT section: Trends with signals expiring < 7 days
- * - WATCHING section: Trends with signals expiring 7-14 days
- * - RECENT RESULTS: Recently verified signals
+ * 1. Overview stats bar (total trends, urgent count, accuracy)
+ * 2. TODAY'S FOCUS: Top 3-5 trends by priority_score (full cards)
+ * 3. OTHER URGENT: Remaining urgent grouped by category (compact)
+ * 4. WATCHING: Trends with signals expiring 7-14 days
+ * 5. OTHER TRENDS: Low urgency
+ * 6. RECENT RESULTS: Recently verified signals
  * 
  * ## API USAGE:
  * - GET /api/trends: Main data source
- * - Returns trends with computed urgency, signal counts
+ * - Returns trends with computed urgency, signal counts, priority_score, category
  * 
  * ## PROPS:
- * - trends: Array of trend objects from API
+ * - trends: Array of trend objects from API (sorted by priority_score DESC)
  * - summary: Summary stats from API
  * - onSelectTrend: Callback when trend card is clicked
  * - loading: Loading state
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Flame, TrendingUp, TrendingDown, Clock, ChevronDown, ChevronUp,
-  AlertTriangle, Eye, Archive, Check, X, Zap
+  AlertTriangle, Eye, Archive, Check, X, Zap, Target, Layers
 } from 'lucide-react';
 import { formatRelativeTime, formatDate, formatNumber, safeParseJSON } from '../utils/format';
+
+// ============================================================
+// Category display config
+// Maps backend category keys to emoji + Vietnamese labels
+// ============================================================
+const CATEGORY_CONFIG = {
+  gold:        { emoji: '🥇', label: 'Vàng & Kim loại' },
+  monetary:    { emoji: '🏦', label: 'Tiền tệ & Ngân hàng' },
+  trade:       { emoji: '🚢', label: 'Thương mại & Thuế quan' },
+  forex:       { emoji: '💱', label: 'Tỷ giá & Ngoại hối' },
+  equity:      { emoji: '📈', label: 'Chứng khoán' },
+  energy:      { emoji: '⛽', label: 'Năng lượng' },
+  geopolitics: { emoji: '🌍', label: 'Địa chính trị' },
+  realestate:  { emoji: '🏠', label: 'Bất động sản' },
+  tech:        { emoji: '💻', label: 'Công nghệ' },
+  agriculture: { emoji: '🌾', label: 'Nông sản' },
+  macro:       { emoji: '📊', label: 'Kinh tế vĩ mô' },
+  fiscal:      { emoji: '🧾', label: 'Thuế & Ngân sách' },
+  other:       { emoji: '📌', label: 'Khác' },
+};
+
+const getCategoryDisplay = (cat) => CATEGORY_CONFIG[cat] || CATEGORY_CONFIG.other;
+
+// Number of top trends to show in "Today's Focus"
+const FOCUS_COUNT = 5;
 
 // ============================================================
 // Overview Stats Bar
@@ -335,6 +364,128 @@ function TrendCard({ trend, onClick, compact = false }) {
 }
 
 // ============================================================
+// Priority Score Badge
+// Shows composite priority score as a visual badge
+// ============================================================
+function PriorityBadge({ score }) {
+  if (score == null) return null;
+  const color = score >= 60 ? 'bg-red-600' :
+                score >= 40 ? 'bg-orange-500' :
+                score >= 25 ? 'bg-yellow-500' : 'bg-gray-400';
+  return (
+    <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full ${color} text-white text-xs font-bold`}>
+      {Math.round(score)}
+    </span>
+  );
+}
+
+// ============================================================
+// Category Badge
+// Shows category emoji + label inline
+// ============================================================
+function CategoryBadge({ category }) {
+  const { emoji, label } = getCategoryDisplay(category);
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
+      {emoji} {label}
+    </span>
+  );
+}
+
+// ============================================================
+// Compact Trend Row (for category-grouped section)
+// Single-line row with score, name, key signal, expiry
+// ============================================================
+function CompactTrendRow({ trend, onClick }) {
+  const {
+    name, name_vi, urgency, signals_count = 0,
+    earliest_signal_expires, priority_score, signals = [],
+  } = trend;
+
+  const daysLeft = earliest_signal_expires
+    ? Math.max(0, Math.ceil((new Date(earliest_signal_expires) - new Date()) / (1000 * 60 * 60 * 24)))
+    : null;
+
+  // Get first active signal summary
+  const firstSignal = (signals || []).find(s => s.status === 'active');
+  const signalHint = firstSignal
+    ? `${firstSignal.direction === 'up' ? '↑' : firstSignal.direction === 'down' ? '↓' : '→'} ${firstSignal.target_indicator || ''}`
+    : '';
+
+  return (
+    <div
+      onClick={() => onClick?.(trend)}
+      className="flex items-center gap-3 py-2 px-3 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors group"
+    >
+      {/* Priority score */}
+      <PriorityBadge score={priority_score} />
+
+      {/* Name */}
+      <div className="flex-1 min-w-0">
+        <div className="font-medium text-sm text-gray-900 truncate group-hover:text-primary-700">
+          {name_vi || name}
+        </div>
+        {signalHint && (
+          <div className="text-xs text-gray-500 truncate">{signalHint}</div>
+        )}
+      </div>
+
+      {/* Signals count */}
+      <span className="text-xs text-gray-500 whitespace-nowrap">
+        {signals_count} signals
+      </span>
+
+      {/* Expiry */}
+      {daysLeft !== null && (
+        <span className={`text-xs px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${
+          daysLeft <= 2 ? 'bg-red-100 text-red-700' :
+          daysLeft <= 7 ? 'bg-yellow-100 text-yellow-700' :
+          'bg-gray-100 text-gray-600'
+        }`}>
+          {daysLeft}d
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// Category Group Component
+// Shows trends for one category in a collapsible group
+// ============================================================
+function CategoryGroup({ category, trends, onClick, defaultExpanded = false }) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const { emoji, label } = getCategoryDisplay(category);
+
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 w-full text-left px-3 py-2 bg-gray-50 hover:bg-gray-100 transition-colors"
+      >
+        <span className="text-base">{emoji}</span>
+        <span className="text-sm font-medium text-gray-800">{label}</span>
+        <span className="px-1.5 py-0.5 bg-white text-gray-600 rounded text-xs font-medium border border-gray-200">
+          {trends.length}
+        </span>
+        {expanded ? (
+          <ChevronUp className="w-3.5 h-3.5 text-gray-400 ml-auto" />
+        ) : (
+          <ChevronDown className="w-3.5 h-3.5 text-gray-400 ml-auto" />
+        )}
+      </button>
+      {expanded && (
+        <div className="divide-y divide-gray-100 bg-white">
+          {trends.map(trend => (
+            <CompactTrendRow key={trend.id} trend={trend} onClick={onClick} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 // Recent Results Section
 // Shows recently verified signals
 // 
@@ -344,11 +495,6 @@ function TrendCard({ trend, onClick, compact = false }) {
 // 2. Or LLM-based verification for qualitative predictions
 // ============================================================
 function RecentResults({ trends }) {
-  // TODO: Implement signal verification system
-  // - Auto-verify quantitative signals when expires_at is reached
-  // - Compare actual indicator value vs target_range
-  // - Update signal.status to verified_correct/verified_wrong
-  
   return (
     <div className="text-center py-6">
       <div className="text-gray-400 mb-2">
@@ -364,27 +510,71 @@ function RecentResults({ trends }) {
 
 // ============================================================
 // Main TrendsPanel Component
+// 
+// Layout:
+// 1. OverviewStats
+// 2. Today's Focus (top N by priority_score, full cards)
+// 3. Other Urgent (grouped by category, compact rows)
+// 4. Watching
+// 5. Other Trends
+// 6. Load More
+// 7. Recent Results
 // ============================================================
 export default function TrendsPanel({
   trends = [],
   summary = {},
   onSelectTrend,
   loading = false,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
 }) {
   const [expandedSections, setExpandedSections] = useState({
-    urgent: true,
+    otherUrgent: true,
     watching: true,
+    low: false,
     results: false,
   });
-
-  // Separate trends by urgency
-  const urgentTrends = trends.filter(t => t.urgency === 'urgent');
-  const watchingTrends = trends.filter(t => t.urgency === 'watching');
-  const lowTrends = trends.filter(t => t.urgency === 'low' || !t.urgency);
 
   const toggleSection = (section) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
+
+  // Partition trends into sections using useMemo for performance
+  const { focusTrends, otherUrgent, watchingTrends, lowTrends, categoryGroups } = useMemo(() => {
+    const urgent = trends.filter(t => t.urgency === 'urgent');
+    const watching = trends.filter(t => t.urgency === 'watching');
+    const low = trends.filter(t => t.urgency === 'low' || !t.urgency);
+
+    // Trends are already sorted by priority_score DESC from API.
+    // Top FOCUS_COUNT urgent become "Today's Focus", rest go to "Other Urgent"
+    const focus = urgent.slice(0, FOCUS_COUNT);
+    const remaining = urgent.slice(FOCUS_COUNT);
+
+    // Group remaining urgent by category
+    const groups = {};
+    for (const t of remaining) {
+      const cat = t.category || 'other';
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(t);
+    }
+
+    // Sort category groups by total signals descending (most active first)
+    const sortedGroups = Object.entries(groups)
+      .sort((a, b) => {
+        const aScore = Math.max(...a[1].map(t => t.priority_score || 0));
+        const bScore = Math.max(...b[1].map(t => t.priority_score || 0));
+        return bScore - aScore;
+      });
+
+    return {
+      focusTrends: focus,
+      otherUrgent: remaining,
+      watchingTrends: watching,
+      lowTrends: low,
+      categoryGroups: sortedGroups,
+    };
+  }, [trends]);
 
   if (loading) {
     return (
@@ -411,34 +601,76 @@ export default function TrendsPanel({
       {/* Overview Stats */}
       <OverviewStats summary={summary} />
 
-      {/* URGENT Section */}
-      {urgentTrends.length > 0 && (
+      {/* ═══════════════════════════════════════════════════════
+          🎯 TODAY'S FOCUS — Top trends by priority score
+          Full TrendCard with narrative + signals visible
+          ═══════════════════════════════════════════════════════ */}
+      {focusTrends.length > 0 && (
         <div>
-          <button
-            onClick={() => toggleSection('urgent')}
-            className="flex items-center gap-2 w-full text-left mb-4"
-          >
-            <AlertTriangle className="w-5 h-5 text-red-500" />
+          <div className="flex items-center gap-2 mb-4">
+            <Target className="w-5 h-5 text-red-500" />
             <h2 className="text-lg font-semibold text-gray-900">
-              Urgent Warnings
+              Today's Focus
             </h2>
             <span className="px-2 py-0.5 bg-red-100 text-red-600 rounded-full text-sm font-medium">
-              {urgentTrends.length}
+              Top {focusTrends.length}
             </span>
-            {expandedSections.urgent ? (
+            <span className="text-xs text-gray-400 ml-2">Ranked by composite priority score</span>
+          </div>
+          
+          <div className="grid md:grid-cols-2 gap-4">
+            {focusTrends.map((trend, idx) => (
+              <div key={trend.id} className="relative">
+                {/* Rank badge overlay */}
+                <div className="absolute -top-2 -left-2 z-10 w-7 h-7 rounded-full bg-red-600 text-white flex items-center justify-center text-xs font-bold shadow-md">
+                  #{idx + 1}
+                </div>
+                <TrendCard
+                  trend={trend}
+                  onClick={onSelectTrend}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════
+          ⚡ OTHER URGENT — Remaining urgent, grouped by category
+          Compact rows in collapsible category groups
+          ═══════════════════════════════════════════════════════ */}
+      {otherUrgent.length > 0 && (
+        <div>
+          <button
+            onClick={() => toggleSection('otherUrgent')}
+            className="flex items-center gap-2 w-full text-left mb-3"
+          >
+            <Layers className="w-5 h-5 text-orange-500" />
+            <h2 className="text-lg font-semibold text-gray-900">
+              Other Urgent
+            </h2>
+            <span className="px-2 py-0.5 bg-orange-100 text-orange-600 rounded-full text-sm font-medium">
+              {otherUrgent.length}
+            </span>
+            <span className="text-xs text-gray-400 ml-1">
+              in {categoryGroups.length} categories
+            </span>
+            {expandedSections.otherUrgent ? (
               <ChevronUp className="w-4 h-4 text-gray-400 ml-auto" />
             ) : (
               <ChevronDown className="w-4 h-4 text-gray-400 ml-auto" />
             )}
           </button>
           
-          {expandedSections.urgent && (
-            <div className="grid md:grid-cols-2 gap-4">
-              {urgentTrends.map(trend => (
-                <TrendCard
-                  key={trend.id}
-                  trend={trend}
+          {expandedSections.otherUrgent && (
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {categoryGroups.map(([cat, catTrends], idx) => (
+                <CategoryGroup
+                  key={cat}
+                  category={cat}
+                  trends={catTrends}
                   onClick={onSelectTrend}
+                  defaultExpanded={idx === 0}  // Expand first (highest priority) category by default
                 />
               ))}
             </div>
@@ -446,7 +678,9 @@ export default function TrendsPanel({
         </div>
       )}
 
-      {/* WATCHING Section */}
+      {/* ═══════════════════════════════════════════════════════
+          👁 WATCHING — Signals expiring 7-14 days
+          ═══════════════════════════════════════════════════════ */}
       {watchingTrends.length > 0 && (
         <div>
           <button
@@ -481,7 +715,9 @@ export default function TrendsPanel({
         </div>
       )}
 
-      {/* LOW/NO URGENCY Section */}
+      {/* ═══════════════════════════════════════════════════════
+          📋 OTHER TRENDS — Low urgency
+          ═══════════════════════════════════════════════════════ */}
       {lowTrends.length > 0 && (
         <div>
           <button
@@ -514,6 +750,26 @@ export default function TrendsPanel({
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Load More */}
+      {hasMore && (
+        <div className="flex justify-center py-4">
+          <button
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className="px-6 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-all"
+          >
+            {loadingMore ? (
+              <span className="flex items-center gap-2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600" />
+                Loading...
+              </span>
+            ) : (
+              'Load More Trends'
+            )}
+          </button>
         </div>
       )}
 

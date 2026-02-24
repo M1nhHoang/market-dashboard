@@ -354,8 +354,11 @@ class ThemeRepository(BaseRepository[Theme]):
         - Signal expires
         
         Updates: urgency, earliest_signal_expires, signals_count, signals_accuracy
+        
+        NOTE: First transitions any expired signals (expires_at < now) to 'expired' status.
+        Only truly active (non-expired) signals are counted for urgency calculation.
         """
-        from sqlalchemy import func, and_
+        from sqlalchemy import func, and_, update as sql_update
         from database.models import Signal
         from datetime import timedelta
         
@@ -365,7 +368,23 @@ class ThemeRepository(BaseRepository[Theme]):
         
         now = self.now()
         
-        # Count active signals
+        # Step 1: Transition expired signals to 'expired' status
+        # Signals past their expires_at should no longer count as active predictions
+        expire_stmt = (
+            sql_update(Signal)
+            .where(
+                and_(
+                    Signal.theme_id == theme_id,
+                    Signal.status == 'active',
+                    Signal.expires_at.isnot(None),
+                    Signal.expires_at < now
+                )
+            )
+            .values(status='expired', updated_at=now)
+        )
+        await self.session.execute(expire_stmt)
+        
+        # Step 2: Count truly active signals (not expired)
         stmt_count = select(func.count(Signal.id)).where(
             and_(
                 Signal.theme_id == theme_id,
@@ -375,7 +394,7 @@ class ThemeRepository(BaseRepository[Theme]):
         result = await self.session.execute(stmt_count)
         signals_count = result.scalar() or 0
         
-        # Get earliest expiry
+        # Step 3: Get earliest expiry of ACTIVE signals only
         stmt_expiry = select(func.min(Signal.expires_at)).where(
             and_(
                 Signal.theme_id == theme_id,
@@ -386,7 +405,7 @@ class ThemeRepository(BaseRepository[Theme]):
         result = await self.session.execute(stmt_expiry)
         earliest_expires = result.scalar()
         
-        # Compute urgency
+        # Step 4: Compute urgency based on earliest active signal expiry
         urgency = None
         if earliest_expires:
             days_until = (earliest_expires - now).days

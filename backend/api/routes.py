@@ -19,6 +19,7 @@ Frontend should use /trends for the main dashboard, while /themes and /signals
 remain available for backward compatibility.
 """
 import json
+import math
 from datetime import datetime, date, timedelta
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
@@ -561,6 +562,106 @@ async def get_theme(theme_id: str):
 
 
 # ============================================================
+# Trends: Priority Score + Category Helpers
+# ============================================================
+
+# Category keywords for auto-classification of themes by name.
+# Order matters: first match wins. More specific patterns first.
+CATEGORY_KEYWORDS = {
+    'gold': ['vàng', 'gold', 'kim loại quý', 'bạc tích trữ'],
+    'monetary': ['lãi suất', 'tiền tệ', 'ngân hàng trung ương', 'omo', 'thanh khoản',
+                 'tín phiếu', 'huy động', 'tiền gửi', 'fed', 'deposit rate', 'interbank',
+                 'tái cơ cấu ngân hàng', 'tăng trưởng ngân hàng'],
+    'trade': ['thương mại', 'thuế quan', 'tariff', 'trade', 'xuất khẩu', 'nhập khẩu',
+              'bảo hộ', 'trừng phạt'],
+    'forex': ['tỷ giá', 'usd/vnd', 'forex', 'ngoại hối', 'đô la', 'nhân dân tệ',
+              'yên', 'đồng', 'dxy'],
+    'equity': ['chứng khoán', 'cổ phiếu', 'vnindex', 'nâng hạng', 'ipo', 'quỹ ngoại',
+               'danh mục'],
+    'energy': ['năng lượng', 'dầu', 'oil', 'gas', 'điện', 'xăng'],
+    'geopolitics': ['địa chính trị', 'quân sự', 'trung đông', 'chiến tranh', 'leo thang',
+                    'xung đột'],
+    'realestate': ['bất động sản', 'nhà ở', 'metro', 'hạ tầng', 'đô thị'],
+    'tech': ['ai ', 'công nghệ', 'chuyển đổi số', 'bán dẫn', 'fdi công nghệ'],
+    'agriculture': ['nông sản', 'nông nghiệp', 'thực phẩm', 'gạo', 'cà phê'],
+    'macro': ['gdp', 'cpi', 'lạm phát', 'tăng trưởng', 'kinh tế vĩ mô', 'tài khóa',
+              'đầu tư công', 'phục hồi kinh tế', 'du lịch'],
+    'fiscal': ['thuế', 'ngân sách', 'thuế suất', 'tuân thủ thuế'],
+}
+
+
+def _classify_category(name: str) -> str:
+    """Classify a theme into a category based on name keywords."""
+    name_lower = (name or '').lower()
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        for kw in keywords:
+            if kw in name_lower:
+                return category
+    return 'other'
+
+
+def _compute_priority_score(trend: dict) -> float:
+    """
+    Compute composite priority score (0-100) for a trend.
+    
+    Components:
+    - Signal density (30%): More active signals = more important
+    - Average confidence (25%): high > medium > low
+    - Strength (15%): Theme strength from LLM
+    - Time urgency (15%): Days until earliest signal expires
+    - Evidence breadth (15%): More events = more evidence
+    
+    This score determines which trends appear in "Today's Focus".
+    """
+    signals = trend.get('signals', [])
+    active_signals = [s for s in signals if s.get('status') == 'active']
+    sig_count = len(active_signals)
+    
+    # 1. Signal density (0-30): logarithmic scale, diminishing returns after ~10
+    # 1 signal → ~9, 5 signals → ~21, 10 → ~27, 43 → ~30
+    sig_score = min(30, math.log2(sig_count + 1) / math.log2(50) * 30) if sig_count > 0 else 0
+    
+    # 2. Average confidence (0-25)
+    conf_map = {'high': 3, 'medium': 2, 'low': 1}
+    if active_signals:
+        avg_conf = sum(conf_map.get(s.get('confidence', 'low'), 1) for s in active_signals) / len(active_signals)
+    else:
+        avg_conf = 1
+    conf_score = (avg_conf / 3.0) * 25
+    
+    # 3. Strength (0-15)
+    strength = trend.get('strength', 0) or 0
+    strength_score = min(strength, 1.0) * 15
+    
+    # 4. Time urgency (0-15): inverted — sooner expiry = higher score
+    expires = trend.get('earliest_signal_expires')
+    if expires:
+        try:
+            exp_dt = datetime.fromisoformat(str(expires).replace('Z', '+00:00'))
+            days_left = max(0, (exp_dt.replace(tzinfo=None) - datetime.now()).total_seconds() / 86400)
+        except:
+            days_left = 14
+    else:
+        days_left = 14
+    
+    if days_left < 1:
+        time_score = 15
+    elif days_left < 3:
+        time_score = 12
+    elif days_left < 7:
+        time_score = 8
+    else:
+        time_score = 4
+    
+    # 5. Evidence breadth (0-15): logarithmic
+    event_count = trend.get('event_count', 0) or 0
+    evidence_score = min(15, math.log2(event_count + 1) / math.log2(20) * 15) if event_count > 0 else 0
+    
+    total = sig_score + conf_score + strength_score + time_score + evidence_score
+    return round(total, 1)
+
+
+# ============================================================
 # Trends (Unified view: Themes + Signals)
 # ============================================================
 # NEW ENDPOINT: Replaces separate /themes and /signals for dashboard
@@ -573,7 +674,9 @@ async def list_trends(
     urgency: Optional[str] = Query(default=None, description="urgent, watching, low"),
     with_summary: bool = Query(default=True, description="Include summary stats"),
     include_fading: bool = Query(default=False, description="Include fading trends"),
-    limit: int = Query(default=30, description="Max results to return")
+    include_empty: bool = Query(default=False, description="Include themes with no active signals"),
+    limit: int = Query(default=30, le=200, description="Max results to return."),
+    offset: int = Query(default=0, ge=0, description="Offset for pagination")
 ):
     """
     List trends for dashboard - unified Themes + Signals view.
@@ -606,17 +709,21 @@ async def list_trends(
                WHERE t.urgency = ?
                AND t.status IN ('active', 'emerging')
                ORDER BY t.earliest_signal_expires ASC
-               LIMIT ?""",
-            (urgency, limit)
+               LIMIT ? OFFSET ?""",
+            (urgency, limit, offset)
         )
     else:
         # Default: all active/emerging, ordered by urgency then strength
+        # By default, exclude themes with no active signals (urgency IS NULL)
+        # to focus the dashboard on actionable trends with predictions
         status_filter = "('active', 'emerging', 'fading')" if include_fading else "('active', 'emerging')"
+        urgency_filter = "" if include_empty else "AND t.urgency IS NOT NULL"
         cursor = conn.execute(
             f"""SELECT t.*,
                        (SELECT COUNT(*) FROM signals s WHERE s.theme_id = t.id AND s.status = 'active') as active_signals_count
                 FROM themes t
                 WHERE t.status IN {status_filter}
+                {urgency_filter}
                 ORDER BY 
                     CASE t.urgency 
                         WHEN 'urgent' THEN 1 
@@ -626,8 +733,8 @@ async def list_trends(
                     END,
                     t.earliest_signal_expires ASC,
                     t.strength DESC
-                LIMIT ?""",
-            (limit,)
+                LIMIT ? OFFSET ?""",
+            (limit, offset)
         )
     
     trends_raw = [dict(row) for row in cursor.fetchall()]
@@ -643,13 +750,15 @@ async def list_trends(
                 except:
                     pass
         
-        # Get signals for this trend
+        # Get active signals for this trend (exclude expired)
+        # Signals past expires_at are automatically transitioned by recompute_trend_stats
         cursor = conn.execute(
             """SELECT * FROM signals 
-               WHERE theme_id = ?
+               WHERE theme_id = ? AND status = 'active'
                ORDER BY 
-                   CASE status WHEN 'active' THEN 1 ELSE 2 END,
-                   expires_at ASC""",
+                   expires_at ASC,
+                   CASE confidence WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                   created_at DESC""",
             (trend['id'],)
         )
         trend['signals'] = [dict(s) for s in cursor.fetchall()]
@@ -669,12 +778,24 @@ async def list_trends(
         else:
             trend['events'] = []
         
+        # Compute priority_score and category for each trend
+        trend['priority_score'] = _compute_priority_score(trend)
+        trend['category'] = _classify_category(trend.get('name_vi') or trend.get('name') or '')
+        
         trends.append(trend)
     
-    result = {"trends": trends}
+    # Sort by priority_score DESC (highest priority first)
+    trends.sort(key=lambda t: t['priority_score'], reverse=True)
+    
+    # has_more: true if there could be more results beyond this page
+    has_more = len(trends_raw) == limit
+    
+    result = {"trends": trends, "has_more": has_more, "offset": offset, "limit": limit}
     
     # Add summary stats if requested
     if with_summary:
+        # Count only themes with active signals (urgency IS NOT NULL)
+        # to match what the dashboard displays
         cursor = conn.execute(
             """SELECT 
                 COUNT(*) as total,
@@ -682,7 +803,8 @@ async def list_trends(
                 SUM(CASE WHEN urgency = 'watching' THEN 1 ELSE 0 END) as watching_count,
                 SUM(CASE WHEN signals_count > 0 THEN 1 ELSE 0 END) as with_signals_count
                FROM themes
-               WHERE status IN ('active', 'emerging')"""
+               WHERE status IN ('active', 'emerging')
+               AND urgency IS NOT NULL"""
         )
         counts = dict(cursor.fetchone())
         

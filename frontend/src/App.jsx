@@ -39,8 +39,47 @@ function App() {
   const { data: otherNewsData, execute: refetchOtherNews } = useFetch(getOtherNews, [], true);
   const { data: watchlistData, loading: watchlistLoading, execute: refetchWatchlist } = useFetch(getWatchlist, [], true);
   const { data: calendarData, execute: refetchCalendar } = useFetch(getCalendar, [], true);
-  // Trends API (replaces separate themes/signals)
-  const { data: trendsData, loading: trendsLoading, execute: refetchTrends } = useFetch(getTrends, [], true);
+  // Trends API with pagination (replaces separate themes/signals)
+  const [trendsData, setTrendsData] = useState(null);
+  const [trendsLoading, setTrendsLoading] = useState(true);
+  const [trendsLoadingMore, setTrendsLoadingMore] = useState(false);
+
+  const fetchTrends = async (offset = 0, append = false) => {
+    if (append) {
+      setTrendsLoadingMore(true);
+    } else {
+      setTrendsLoading(true);
+    }
+    try {
+      const result = await getTrends({ offset });
+      if (append && trendsData) {
+        // Append new trends to existing, keep summary from fresh response
+        setTrendsData({
+          ...result,
+          trends: [...trendsData.trends, ...result.trends],
+        });
+      } else {
+        setTrendsData(result);
+      }
+    } catch (err) {
+      console.error('Fetch trends failed:', err);
+    } finally {
+      setTrendsLoading(false);
+      setTrendsLoadingMore(false);
+    }
+  };
+
+  const handleLoadMoreTrends = () => {
+    if (!trendsData?.has_more || trendsLoadingMore) return;
+    const nextOffset = (trendsData.offset || 0) + (trendsData.limit || 30);
+    fetchTrends(nextOffset, true);
+  };
+
+  const refetchTrends = () => fetchTrends(0, false);
+
+  // Initial fetch for trends
+  useEffect(() => { fetchTrends(); }, []);
+
   const { data: sidebarTrends, execute: refetchSidebarTrends } = useFetch(getUrgentTrendsSidebar, [], true);
 
   // Manual refresh
@@ -245,6 +284,9 @@ function App() {
             summary={trendsData?.summary}
             onSelectTrend={(trend) => trendModal.open(trend)}
             loading={trendsLoading}
+            hasMore={trendsData?.has_more || false}
+            loadingMore={trendsLoadingMore}
+            onLoadMore={handleLoadMoreTrends}
           />
         ) : activeTab === 'watchlist' ? (
           // Watchlist View
