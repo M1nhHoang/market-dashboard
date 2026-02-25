@@ -2,28 +2,16 @@
  * TrendsPanel Component
  * 
  * Main dashboard view for the unified Trends system.
- * Replaces the separate Themes and Signals tabs.
- * 
- * ## CONCEPT:
- * A "Trend" combines:
- * - Narrative: The story/context (e.g., "Căng thẳng thanh khoản")
- * - Signals: Predictions with expiry dates
- * - Events: Evidence supporting the narrative
- * - Urgency: Computed from earliest signal expiry
- * - Priority Score: Composite score (0-100) for importance ranking
- * - Category: Auto-classified (gold, monetary, trade, forex, etc.)
  * 
  * ## LAYOUT:
- * 1. Overview stats bar (total trends, urgent count, accuracy)
- * 2. TODAY'S FOCUS: Top 3-5 trends by priority_score (full cards)
- * 3. OTHER URGENT: Remaining urgent grouped by category (compact)
- * 4. WATCHING: Trends with signals expiring 7-14 days
- * 5. OTHER TRENDS: Low urgency
- * 6. RECENT RESULTS: Recently verified signals
- * 
- * ## API USAGE:
- * - GET /api/trends: Main data source
- * - Returns trends with computed urgency, signal counts, priority_score, category
+ * 1. Overview stats bar
+ * 2. ★ Overall Market Consensus (weighted bullish/bearish bar)
+ * 3. ★ Signal Consensus by Indicator (grid cards)
+ * 4. TODAY'S FOCUS: Top 5 trends (cards with consensus + expandable indicator breakdown)
+ * 5. OTHER URGENT: Remaining urgent grouped by category (compact)
+ * 6. WATCHING: Trends with signals expiring 7-14 days (same card style as Focus)
+ * 7. OTHER TRENDS: Low urgency (compact)
+ * 8. RECENT RESULTS: Recently verified signals
  * 
  * ## PROPS:
  * - trends: Array of trend objects from API (sorted by priority_score DESC)
@@ -35,9 +23,13 @@
 import React, { useState, useMemo } from 'react';
 import { 
   Flame, TrendingUp, TrendingDown, Clock, ChevronDown, ChevronUp,
-  AlertTriangle, Eye, Archive, Check, X, Zap, Target, Layers
+  AlertTriangle, Eye, Archive, Check, X, Zap, Target, Layers, BarChart3
 } from 'lucide-react';
 import { formatRelativeTime, formatDate, formatNumber, safeParseJSON } from '../utils/format';
+import { 
+  computeConsensus, groupSignalsByIndicator, getDaysUntilExpiry, 
+  formatTargetRange, getIndicatorIcon 
+} from '../utils/consensus';
 
 // ============================================================
 // Category display config
@@ -108,16 +100,344 @@ function OverviewStats({ summary }) {
 }
 
 // ============================================================
-// Trend Card Component
-// Individual card showing trend summary with inline signals
+// Consensus Bar Component
+// Renders a bullish/bearish gradient bar with percentage labels
+// ============================================================
+function ConsensusBar({ consensus, size = 'normal' }) {
+  const { bullishPct, bearishPct, direction, totalSignals, upCount, downCount, stableCount } = consensus;
+  
+  if (totalSignals === 0) return null;
+
+  const barHeight = size === 'large' ? 'h-3' : 'h-2';
+  
+  const dirColors = {
+    bullish: { bg: 'bg-green-500', text: 'text-green-700' },
+    bearish: { bg: 'bg-red-500', text: 'text-red-700' },
+    neutral: { bg: 'bg-gray-400', text: 'text-gray-600' },
+  };
+  const colors = dirColors[direction] || dirColors.neutral;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className={`text-xs font-semibold ${direction === 'bearish' ? 'text-red-600' : 'text-gray-400'}`}>
+          {direction === 'bearish' ? `▼ ${bearishPct}% DOWN` : `▼ ${bearishPct}%`}
+        </span>
+        <span className={`text-xs font-semibold ${direction === 'bullish' ? 'text-green-600' : 'text-gray-400'}`}>
+          {direction === 'bullish' ? `▲ ${bullishPct}% UP` : `${bullishPct}% ▲`}
+        </span>
+      </div>
+      <div className={`w-full ${barHeight} rounded-full bg-red-100 overflow-hidden`}>
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${
+            direction === 'bullish' ? 'bg-green-500' : direction === 'bearish' ? 'bg-red-500' : 'bg-gray-400'
+          }`}
+          style={{ width: `${bullishPct}%`, marginLeft: '0' }}
+        />
+      </div>
+      {size === 'large' && (
+        <div className="text-xs text-gray-400 mt-1 text-center">
+          {totalSignals} signals · {upCount}↑ {downCount}↓ {stableCount > 0 ? `${stableCount}→` : ''}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// Overall Market Consensus Section
+// Shows aggregate weighted consensus across ALL signals
+// ============================================================
+function OverallMarketConsensus({ allSignals }) {
+  const consensus = useMemo(() => computeConsensus(allSignals), [allSignals]);
+  const indicatorGroups = useMemo(() => groupSignalsByIndicator(allSignals), [allSignals]);
+
+  if (consensus.totalSignals === 0) return null;
+
+  const { direction, bullishPct, bearishPct, totalSignals } = consensus;
+  
+  const bgColor = direction === 'bullish' ? 'border-green-200 bg-green-50/50' 
+    : direction === 'bearish' ? 'border-red-200 bg-red-50/50' 
+    : 'border-gray-200 bg-gray-50/50';
+
+  const mainLabel = direction === 'bullish' ? `BULLISH ${bullishPct}%`
+    : direction === 'bearish' ? `BEARISH ${bearishPct}%`
+    : `NEUTRAL ${bullishPct}%`;
+
+  const mainColor = direction === 'bullish' ? 'text-green-700'
+    : direction === 'bearish' ? 'text-red-700'
+    : 'text-gray-600';
+
+  return (
+    <div className={`rounded-xl border-2 ${bgColor} p-5 mb-6`}>
+      <div className="text-center mb-3">
+        <div className={`text-xl font-bold ${mainColor}`}>
+          {direction === 'bullish' ? '▲' : direction === 'bearish' ? '▼' : '→'} {mainLabel}
+        </div>
+        <div className="text-xs text-gray-500 mt-1">
+          Based on {totalSignals} active signals across {indicatorGroups.length} indicators
+        </div>
+      </div>
+      <ConsensusBar consensus={consensus} size="large" />
+    </div>
+  );
+}
+
+// ============================================================
+// Indicator Consensus Card (for the grid)
+// Single card showing consensus for one indicator
+// ============================================================
+function IndicatorConsensusCard({ indicator, signals, consensus }) {
+  const icon = getIndicatorIcon(indicator);
+  const { direction, bullishPct, bearishPct, totalSignals, upCount, downCount, stableCount } = consensus;
+
+  const borderColor = direction === 'bullish' ? 'border-green-200 hover:border-green-300'
+    : direction === 'bearish' ? 'border-red-200 hover:border-red-300'
+    : 'border-gray-200 hover:border-gray-300';
+
+  const pctLabel = direction === 'bullish' ? `▲ ${bullishPct}% UP`
+    : direction === 'bearish' ? `▼ ${bearishPct}% DOWN`
+    : `→ ${bullishPct}% FLAT`;
+
+  const pctColor = direction === 'bullish' ? 'text-green-600'
+    : direction === 'bearish' ? 'text-red-600'
+    : 'text-gray-500';
+
+  return (
+    <div className={`bg-white rounded-lg border ${borderColor} p-3 transition-all`}>
+      <div className="flex items-center gap-1.5 mb-2">
+        <span className="text-base">{icon}</span>
+        <span className="font-medium text-sm text-gray-800 truncate">{indicator}</span>
+      </div>
+      
+      <div className={`text-sm font-bold ${pctColor} mb-2`}>{pctLabel}</div>
+      
+      <ConsensusBar consensus={consensus} size="small" />
+      
+      <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
+        <span>{totalSignals} signals</span>
+        <span>{upCount}↑ {downCount}↓{stableCount > 0 ? ` ${stableCount}→` : ''}</span>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// Indicator Consensus Grid Section
+// Shows per-indicator consensus cards, sorted by signal count
+// ============================================================
+function IndicatorConsensusGrid({ allSignals }) {
+  const [showAll, setShowAll] = useState(false);
+  const indicatorGroups = useMemo(() => groupSignalsByIndicator(allSignals), [allSignals]);
+
+  if (indicatorGroups.length === 0) return null;
+
+  const DEFAULT_VISIBLE = 6;
+  const visible = showAll ? indicatorGroups : indicatorGroups.slice(0, DEFAULT_VISIBLE);
+  const hasMore = indicatorGroups.length > DEFAULT_VISIBLE;
+
+  return (
+    <div className="mb-6">
+      <div className="flex items-center gap-2 mb-3">
+        <BarChart3 className="w-5 h-5 text-blue-500" />
+        <h2 className="text-lg font-semibold text-gray-900">Signal Consensus by Indicator</h2>
+        <span className="text-xs text-gray-400">sorted by signal count</span>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 gap-3">
+        {visible.map(({ indicator, signals, consensus }) => (
+          <IndicatorConsensusCard
+            key={indicator}
+            indicator={indicator}
+            signals={signals}
+            consensus={consensus}
+          />
+        ))}
+      </div>
+
+      {hasMore && (
+        <button
+          onClick={() => setShowAll(!showAll)}
+          className="mt-3 text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"
+        >
+          {showAll ? (
+            <>
+              <ChevronUp className="w-4 h-4" />
+              Show less
+            </>
+          ) : (
+            <>
+              <ChevronDown className="w-4 h-4" />
+              Show {indicatorGroups.length - DEFAULT_VISIBLE} more indicators
+            </>
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// Signal Row Component
+// Individual signal within the indicator breakdown
+// Shows: direction, prediction text, target, confidence, expiry
+// ============================================================
+function SignalRow({ signal }) {
+  const daysUntil = getDaysUntilExpiry(signal.expires_at);
+  const targetDisplay = formatTargetRange(signal);
+
+  const dirIcon = signal.direction === 'up' ? '↑' : signal.direction === 'down' ? '↓' : '→';
+  const dirColor = signal.direction === 'up' ? 'text-green-500'
+    : signal.direction === 'down' ? 'text-red-500'
+    : 'text-gray-400';
+
+  const confConfig = {
+    high: { color: 'text-green-600 bg-green-50', label: 'high' },
+    medium: { color: 'text-yellow-600 bg-yellow-50', label: 'med' },
+    low: { color: 'text-red-600 bg-red-50', label: 'low' },
+  };
+  const conf = confConfig[signal.confidence] || confConfig.medium;
+
+  return (
+    <div className="py-2 px-3 bg-gray-50/70 rounded-lg text-sm">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2 flex-1 min-w-0">
+          <span className={`text-base mt-0.5 ${dirColor} flex-shrink-0`}>{dirIcon}</span>
+          <div className="min-w-0 flex-1">
+            {signal.prediction && (
+              <p className="text-gray-700 text-sm leading-snug line-clamp-2">
+                {signal.prediction}
+              </p>
+            )}
+            {!signal.prediction && (
+              <p className="text-gray-500 text-sm italic">
+                {signal.target_indicator} {signal.direction}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {/* Target range */}
+          <span className="text-xs font-mono text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
+            {targetDisplay}
+          </span>
+          {/* Confidence badge */}
+          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${conf.color}`}>
+            {conf.label}
+          </span>
+          {/* Expiry */}
+          {daysUntil !== null && (
+            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+              daysUntil <= 2 ? 'bg-red-100 text-red-700' :
+              daysUntil <= 7 ? 'bg-yellow-100 text-yellow-700' :
+              'bg-gray-100 text-gray-600'
+            }`}>
+              ⏰ {daysUntil}d
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// Indicator Breakdown Section (inside expanded TrendCard)
+// Groups signals by indicator, shows per-indicator consensus + signal rows
+// ============================================================
+function IndicatorBreakdown({ signals }) {
+  const groups = useMemo(() => groupSignalsByIndicator(signals), [signals]);
+
+  if (groups.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      {groups.map(({ indicator, signals: indSignals, consensus: indConsensus }) => {
+        const icon = getIndicatorIcon(indicator);
+        return (
+          <div key={indicator} className="border border-gray-200 rounded-lg overflow-hidden">
+            {/* Indicator header + consensus */}
+            <div className="px-3 py-2 bg-gray-50 border-b border-gray-100">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm">{icon}</span>
+                  <span className="font-medium text-sm text-gray-800">{indicator}</span>
+                  <span className="text-xs text-gray-400">({indSignals.length} signals)</span>
+                </div>
+                <span className={`text-xs font-bold ${
+                  indConsensus.direction === 'bullish' ? 'text-green-600' :
+                  indConsensus.direction === 'bearish' ? 'text-red-600' : 'text-gray-500'
+                }`}>
+                  {indConsensus.label}
+                </span>
+              </div>
+              <ConsensusBar consensus={indConsensus} size="small" />
+            </div>
+            {/* Individual signals */}
+            <div className="p-2 space-y-1.5">
+              {indSignals
+                .sort((a, b) => {
+                  // Sort by expires_at ASC, then confidence DESC
+                  if (a.expires_at && b.expires_at) {
+                    const diff = new Date(a.expires_at) - new Date(b.expires_at);
+                    if (diff !== 0) return diff;
+                  }
+                  const confOrder = { high: 1, medium: 2, low: 3 };
+                  return (confOrder[a.confidence] || 3) - (confOrder[b.confidence] || 3);
+                })
+                .map((sig, idx) => (
+                  <SignalRow key={sig.id || idx} signal={sig} />
+                ))
+              }
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ============================================================
+// Indicator Mini Cards (compact, shown inside TrendCard before expand)
+// Small cards: icon + indicator + consensus% + signal count
+// ============================================================
+function IndicatorMiniCards({ signals }) {
+  const groups = useMemo(() => groupSignalsByIndicator(signals), [signals]);
+  
+  if (groups.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {groups.map(({ indicator, signals: indSignals, consensus: indConsensus }) => {
+        const icon = getIndicatorIcon(indicator);
+        const pctColor = indConsensus.direction === 'bullish' ? 'text-green-600'
+          : indConsensus.direction === 'bearish' ? 'text-red-600'
+          : 'text-gray-500';
+        const borderColor = indConsensus.direction === 'bullish' ? 'border-green-200'
+          : indConsensus.direction === 'bearish' ? 'border-red-200'
+          : 'border-gray-200';
+
+        return (
+          <div key={indicator} className={`inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg border ${borderColor} bg-white text-xs`}>
+            <span>{icon}</span>
+            <span className="font-medium text-gray-700">{indicator}</span>
+            <span className={`font-bold ${pctColor}`}>{indConsensus.label}</span>
+            <span className="text-gray-400">{indSignals.length}sig</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ============================================================
+// Trend Card Component (REDESIGNED)
 // 
-// Signals are sorted by:
-// 1. expires_at ASC (soonest first)
-// 2. confidence (high > medium > low)
-// 3. created_at DESC (newest first)
+// Shows: header, overall consensus bar, indicator mini-cards
+// Expandable: full indicator breakdown with individual signals
 // ============================================================
 function TrendCard({ trend, onClick, compact = false }) {
-  const [showAllSignals, setShowAllSignals] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   
   const {
     id,
@@ -127,7 +447,7 @@ function TrendCard({ trend, onClick, compact = false }) {
     status,
     strength,
     urgency,
-    signals = [],  // Array of signal objects from API
+    signals = [],
     signals_count = 0,
     signals_accuracy,
     signals_correct_count = 0,
@@ -137,44 +457,17 @@ function TrendCard({ trend, onClick, compact = false }) {
     event_count = 0,
   } = trend;
 
-  // Parse indicators if JSON string
   const indicators = safeParseJSON(related_indicators, []);
   
-  // Get active signals only and sort them
-  const activeSignals = (signals || [])
-    .filter(s => s.status === 'active')
-    .sort((a, b) => {
-      // 1. Sort by expires_at ASC (soonest first)
-      if (a.expires_at && b.expires_at) {
-        const diff = new Date(a.expires_at) - new Date(b.expires_at);
-        if (diff !== 0) return diff;
-      } else if (a.expires_at) return -1;
-      else if (b.expires_at) return 1;
-      
-      // 2. Sort by confidence (high > medium > low)
-      const confOrder = { high: 1, medium: 2, low: 3 };
-      const confDiff = (confOrder[a.confidence] || 3) - (confOrder[b.confidence] || 3);
-      if (confDiff !== 0) return confDiff;
-      
-      // 3. Sort by created_at DESC (newest first)
-      return new Date(b.created_at) - new Date(a.created_at);
-    });
-  
-  // Display max 3 signals, "see more" for rest
-  const MAX_VISIBLE_SIGNALS = 3;
-  const visibleSignals = showAllSignals ? activeSignals : activeSignals.slice(0, MAX_VISIBLE_SIGNALS);
-  const hasMoreSignals = activeSignals.length > MAX_VISIBLE_SIGNALS;
+  const activeSignals = useMemo(() => 
+    (signals || []).filter(s => s.status === 'active'),
+    [signals]
+  );
 
-  // Calculate days until earliest signal expires
-  const getDaysUntilExpiry = () => {
-    if (!earliest_signal_expires) return null;
-    const now = new Date();
-    const expiry = new Date(earliest_signal_expires);
-    const diffDays = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
-    return Math.max(0, diffDays);
-  };
+  const trendConsensus = useMemo(() => computeConsensus(activeSignals), [activeSignals]);
+  const indicatorGroups = useMemo(() => groupSignalsByIndicator(activeSignals), [activeSignals]);
 
-  const daysLeft = getDaysUntilExpiry();
+  const daysLeft = getDaysUntilExpiry(earliest_signal_expires);
 
   // Urgency badge config
   const getUrgencyBadge = () => {
@@ -205,7 +498,6 @@ function TrendCard({ trend, onClick, compact = false }) {
     }
   };
 
-  // Confidence badge based on signal accuracy
   const getConfidenceBadge = () => {
     if (signals_verified_count === 0) return null;
     const accuracy = signals_correct_count / signals_verified_count;
@@ -218,7 +510,6 @@ function TrendCard({ trend, onClick, compact = false }) {
   };
 
   if (compact) {
-    // Compact view for collapsed sections
     return (
       <div
         onClick={() => onClick?.(trend)}
@@ -239,12 +530,9 @@ function TrendCard({ trend, onClick, compact = false }) {
   }
 
   return (
-    <div
-      onClick={() => onClick?.(trend)}
-      className="bg-white rounded-xl border border-gray-200 hover:border-primary-300 hover:shadow-md cursor-pointer transition-all overflow-hidden"
-    >
-      {/* Header */}
-      <div className="p-4 border-b border-gray-100">
+    <div className="bg-white rounded-xl border border-gray-200 hover:border-primary-300 hover:shadow-md transition-all overflow-hidden">
+      {/* Header — clickable to open trend detail */}
+      <div className="p-4 border-b border-gray-100 cursor-pointer" onClick={() => onClick?.(trend)}>
         <div className="flex items-start justify-between mb-2">
           <div className="flex items-center gap-2">
             <Flame className={`w-5 h-5 ${urgency === 'urgent' ? 'text-red-500' : 'text-orange-400'}`} />
@@ -260,11 +548,12 @@ function TrendCard({ trend, onClick, compact = false }) {
           </div>
         </div>
         
-        {/* Meta line */}
         <div className="flex items-center gap-3 text-xs text-gray-500">
           <span>Strength: {strength?.toFixed(1)}</span>
           <span>•</span>
-          <span>{signals_count} signals</span>
+          <span>{activeSignals.length} signals</span>
+          <span>•</span>
+          <span>{indicatorGroups.length} indicators</span>
           <span>•</span>
           <span>{event_count} events</span>
           {getConfidenceBadge() && (
@@ -276,87 +565,62 @@ function TrendCard({ trend, onClick, compact = false }) {
         </div>
       </div>
 
-      {/* Narrative */}
-      {narrative && (
-        <div className="px-4 py-3 bg-gray-50 border-b border-gray-100">
-          <p className="text-sm text-gray-700 line-clamp-3">
+      {/* Overall Trend Consensus */}
+      {trendConsensus.totalSignals > 0 && (
+        <div className="px-4 py-3 border-b border-gray-100">
+          <ConsensusBar consensus={trendConsensus} size="large" />
+        </div>
+      )}
+
+      {/* Indicator Mini Cards (always visible) */}
+      {indicatorGroups.length > 0 && (
+        <div className="px-4 py-3 border-b border-gray-100">
+          <IndicatorMiniCards signals={activeSignals} />
+        </div>
+      )}
+
+      {/* Expand/Collapse button for full indicator breakdown */}
+      {activeSignals.length > 0 && (
+        <div className="px-4 py-2 border-b border-gray-100">
+          <button
+            onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+            className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 font-medium w-full justify-center"
+          >
+            {expanded ? (
+              <>
+                <ChevronUp className="w-4 h-4" />
+                Collapse signal detail
+              </>
+            ) : (
+              <>
+                <ChevronDown className="w-4 h-4" />
+                Expand {activeSignals.length} signals by indicator
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* Expanded: Full Indicator Breakdown */}
+      {expanded && (
+        <div className="p-4">
+          <IndicatorBreakdown signals={activeSignals} />
+        </div>
+      )}
+
+      {/* Narrative (collapsed state, shown below) */}
+      {narrative && !expanded && (
+        <div className="px-4 py-3 bg-gray-50">
+          <p className="text-sm text-gray-700 line-clamp-2">
             💡 {narrative}
           </p>
         </div>
       )}
 
-      {/* Signals List - show actual signals with targets */}
-      {activeSignals.length > 0 && (
-        <div className="p-4">
-          <div className="text-xs font-medium text-gray-500 uppercase mb-2">
-            📡 Signals ({activeSignals.length})
-          </div>
-          <div className="space-y-2">
-            {visibleSignals.map((signal, idx) => {
-              const daysUntil = signal.expires_at 
-                ? Math.max(0, Math.ceil((new Date(signal.expires_at) - new Date()) / (1000 * 60 * 60 * 24)))
-                : null;
-              
-              return (
-                <div
-                  key={signal.id || idx}
-                  className="flex items-center justify-between py-1.5 px-2 bg-gray-50 rounded text-sm"
-                >
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    {/* Direction indicator */}
-                    <span className={`text-base ${
-                      signal.direction === 'up' ? 'text-green-500' : 
-                      signal.direction === 'down' ? 'text-red-500' : 'text-gray-400'
-                    }`}>
-                      {signal.direction === 'up' ? '↑' : signal.direction === 'down' ? '↓' : '→'}
-                    </span>
-                    
-                    {/* Indicator name */}
-                    <span className="font-medium text-gray-700">
-                      {signal.target_indicator || 'Signal'}
-                    </span>
-                    
-                    {/* Target range if quantitative, otherwise just direction */}
-                    <span className="text-gray-500 truncate">
-                      {signal.target_range_low != null && signal.target_range_high != null
-                        ? `${signal.target_range_low} - ${signal.target_range_high}`
-                        : signal.direction?.toUpperCase() || ''
-                      }
-                    </span>
-                  </div>
-                  
-                  {/* Expiry badge */}
-                  {daysUntil !== null && (
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${
-                      daysUntil <= 2 ? 'bg-red-100 text-red-700' :
-                      daysUntil <= 7 ? 'bg-yellow-100 text-yellow-700' :
-                      'bg-gray-100 text-gray-600'
-                    }`}>
-                      ⏰ {daysUntil}d
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-            
-            {/* See more button */}
-            {hasMoreSignals && !showAllSignals && (
-              <button
-                onClick={(e) => { e.stopPropagation(); setShowAllSignals(true); }}
-                className="text-xs text-primary-600 hover:text-primary-700 font-medium"
-              >
-                + {activeSignals.length - MAX_VISIBLE_SIGNALS} more signals
-              </button>
-            )}
-            {showAllSignals && hasMoreSignals && (
-              <button
-                onClick={(e) => { e.stopPropagation(); setShowAllSignals(false); }}
-                className="text-xs text-gray-500 hover:text-gray-600"
-              >
-                Show less
-              </button>
-            )}
-          </div>
+      {/* Events link */}
+      {event_count > 0 && (
+        <div className="px-4 py-2 text-xs text-gray-400 cursor-pointer" onClick={() => onClick?.(trend)}>
+          🔗 {event_count} causal events
         </div>
       )}
     </div>
@@ -475,7 +739,7 @@ function CategoryGroup({ category, trends, onClick, defaultExpanded = false }) {
         )}
       </button>
       {expanded && (
-        <div className="divide-y divide-gray-100 bg-white">
+        <div className="divide-y divide-gray-100 bg-white max-h-[440px] overflow-y-auto">
           {trends.map(trend => (
             <CompactTrendRow key={trend.id} trend={trend} onClick={onClick} />
           ))}
@@ -525,14 +789,11 @@ export default function TrendsPanel({
   summary = {},
   onSelectTrend,
   loading = false,
-  hasMore = false,
-  loadingMore = false,
-  onLoadMore,
 }) {
   const [expandedSections, setExpandedSections] = useState({
     otherUrgent: true,
     watching: true,
-    low: false,
+    low: true,
     results: false,
   });
 
@@ -541,7 +802,7 @@ export default function TrendsPanel({
   };
 
   // Partition trends into sections using useMemo for performance
-  const { focusTrends, otherUrgent, watchingTrends, lowTrends, categoryGroups } = useMemo(() => {
+  const { focusTrends, otherUrgent, watchingTrends, lowTrends, categoryGroups, allActiveSignals } = useMemo(() => {
     const urgent = trends.filter(t => t.urgency === 'urgent');
     const watching = trends.filter(t => t.urgency === 'watching');
     const low = trends.filter(t => t.urgency === 'low' || !t.urgency);
@@ -567,12 +828,23 @@ export default function TrendsPanel({
         return bScore - aScore;
       });
 
+    // Collect ALL active signals from ALL trends for overall consensus
+    const allSignals = [];
+    for (const t of trends) {
+      if (t.signals) {
+        for (const sig of t.signals) {
+          if (sig.status === 'active') allSignals.push(sig);
+        }
+      }
+    }
+
     return {
       focusTrends: focus,
       otherUrgent: remaining,
       watchingTrends: watching,
       lowTrends: low,
       categoryGroups: sortedGroups,
+      allActiveSignals: allSignals,
     };
   }, [trends]);
 
@@ -600,6 +872,18 @@ export default function TrendsPanel({
     <div className="space-y-6">
       {/* Overview Stats */}
       <OverviewStats summary={summary} />
+
+      {/* ═══════════════════════════════════════════════════════
+          ★ OVERALL MARKET CONSENSUS
+          Weighted bullish/bearish bar across all active signals
+          ═══════════════════════════════════════════════════════ */}
+      <OverallMarketConsensus allSignals={allActiveSignals} />
+
+      {/* ═══════════════════════════════════════════════════════
+          ★ SIGNAL CONSENSUS BY INDICATOR
+          Grid of per-indicator consensus cards
+          ═══════════════════════════════════════════════════════ */}
+      <IndicatorConsensusGrid allSignals={allActiveSignals} />
 
       {/* ═══════════════════════════════════════════════════════
           🎯 TODAY'S FOCUS — Top trends by priority score
@@ -663,14 +947,14 @@ export default function TrendsPanel({
           </button>
           
           {expandedSections.otherUrgent && (
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3 items-start">
               {categoryGroups.map(([cat, catTrends], idx) => (
                 <CategoryGroup
                   key={cat}
                   category={cat}
                   trends={catTrends}
                   onClick={onSelectTrend}
-                  defaultExpanded={idx === 0}  // Expand first (highest priority) category by default
+                  defaultExpanded={false}  // All categories collapsed by default
                 />
               ))}
             </div>
@@ -753,25 +1037,7 @@ export default function TrendsPanel({
         </div>
       )}
 
-      {/* Load More */}
-      {hasMore && (
-        <div className="flex justify-center py-4">
-          <button
-            onClick={onLoadMore}
-            disabled={loadingMore}
-            className="px-6 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-all"
-          >
-            {loadingMore ? (
-              <span className="flex items-center gap-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600" />
-                Loading...
-              </span>
-            ) : (
-              'Load More Trends'
-            )}
-          </button>
-        </div>
-      )}
+
 
       {/* Recent Results */}
       <div>

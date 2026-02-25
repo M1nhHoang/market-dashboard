@@ -92,6 +92,18 @@ Chấm điểm và phân tích tin này. Chỉ trả về JSON (không markdown)
 - timeframe_days: thời gian dự đoán xảy ra (1-30 ngày)
 - confidence "high" chỉ khi có bằng chứng mạnh
 
+**Quy tắc đơn vị target_range (BẮT BUỘC tuân thủ):**
+- Lãi suất (interbank_on, interbank_1w, deposit_rate, ...): đơn vị % (ví dụ: 8.5, 9.2)
+- Tỷ giá (usd_vnd, usd_vnd_central): đơn vị VND (ví dụ: 25100, 25350)
+- Vàng SJC (gold_sjc): đơn vị triệu VND/lượng (ví dụ: 185, 196)
+- Vàng thế giới (gold_world): đơn vị USD/oz (ví dụ: 2850, 2920)
+- Dầu (brent_alf, brent_oil): đơn vị USD/thùng (ví dụ: 75.5, 80.0)
+- DXY (dxy): chỉ số (ví dụ: 104.2, 106.5)
+- VN-Index (vn_index, vnindex): điểm (ví dụ: 1250, 1300)
+- Giá cổ phiếu (stock_*): đơn vị nghìn VND (ví dụ: 128, 135 cho 128,000đ)
+- Thanh khoản (market_liquidity_*): đơn vị tỷ VND (ví dụ: 35000, 40000)
+- KHÔNG sử dụng đơn vị VND đầy đủ cho vàng SJC (sai: 185000000, đúng: 185)
+
 **Quy tắc Theme:**
 - Nếu tin thuộc chủ đề đang có trong active_themes → link existing_theme_id
 - Tạo theme mới nếu tin bắt đầu một xu hướng/chủ đề mới quan trọng
